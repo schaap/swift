@@ -234,14 +234,6 @@ namespace swift {
     };
 
 
-    class DataStorer {
-    public:
-        DataStorer (const Sha1Hash& id, size_t size);
-        virtual size_t    ReadData (bin64_t pos,uint8_t** buf) = 0;
-        virtual size_t    WriteData (bin64_t pos, uint8_t* buf, size_t len) = 0;
-    };
-
-
     /**    swift channel's "control block"; channels loosely correspond to TCP
         connections or FTP sessions; one channel is created for one file
         being transferred between two peers. As we don't need buffers and

@@ -38,6 +38,9 @@ void catch_signal( int signum ) {
 int main (int argc, char** argv) {
     // nodht TODO
     // old: daemon, debug, progress, http
+    //
+    // TODO: Adjust HashTree to use separate and external data and hash stores
+    // TODO: Add option to seed/leech fake data of given size, with given multiplier  -> 2TB with multiplier can use 250M data times 8K using a bitmap of 250M to keep track of which parts are received
     
     // The long options that are allowed. See below (or run with -?) for the complete usage.
     static struct option long_options[] =

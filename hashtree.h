@@ -10,35 +10,13 @@
 #define SWIFT_SHA1_HASH_TREE_H
 #include "bin64.h"
 #include "bins.h"
+#include "storage.h"
+#include "sha1hash.h"
 #include <string.h>
 #include <string>
 
+
 namespace swift {
-
-
-/** SHA-1 hash, 20 bytes of data */
-struct Sha1Hash {
-    uint8_t    bits[20];
-
-    Sha1Hash() { memset(bits,0,20); }
-    /** Make a hash of two hashes (for building Merkle hash trees). */
-    Sha1Hash(const Sha1Hash& left, const Sha1Hash& right);
-    /** Hash an old plain string. */
-    Sha1Hash(const char* str, size_t length=-1);
-    Sha1Hash(const uint8_t* data, size_t length);
-    /** Either parse hash from hex representation of read in raw format. */
-    Sha1Hash(bool hex, const char* hash);
-    
-    std::string    hex() const;
-    bool    operator == (const Sha1Hash& b) const
-        { return 0==memcmp(bits,b.bits,SIZE); }
-    bool    operator != (const Sha1Hash& b) const { return !(*this==b); }
-    const char* operator * () const { return (char*) bits; }
-    
-    const static Sha1Hash ZERO;
-    const static size_t SIZE;
-};
-
 
 /** This class controls data integrity of some file; hash tree is put to
     an auxilliary file next to it. The hash tree file is mmap'd for
@@ -61,7 +39,10 @@ class HashTree {
     int             peak_count_;
     /** File descriptor to put hashes to */
     int             fd_;
-    int             hash_fd_;
+    //int             hash_fd_;  // @deprecated
+    /** Stores for data and hashes */
+    //DataStorage     data_storage_;
+    HashStorage     hash_storage_;
     /** Whether to re-hash files. */
     bool            data_recheck_;
     /** Base size, as derived from the hashes. */
@@ -81,8 +62,11 @@ protected:
     
 public:
     
+    // @deprecated
     HashTree (const char* file_name, const Sha1Hash& root=Sha1Hash::ZERO, 
               const char* hash_filename=NULL);
+    HashTree (const char* file_name, const Sha1Hash& root=Sha1Hash::ZERO,
+              const HashStorage& hash_storage=HashStorage::NONE);
     
     /** Offer a hash; returns true if it verified; false otherwise.
      Once it cannot be verified (no sibling or parent), the hash
