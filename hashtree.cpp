@@ -13,6 +13,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <errno.h>
 #include "compat.h"
 
 #ifdef _WIN32
@@ -325,7 +326,8 @@ bool            HashTree::OfferData (bin64_t pos, const char* data, size_t lengt
 
     //printf("g %lli %s\n",(uint64_t)pos,hash.hex().c_str());
     ack_out_.set(pos,binmap_t::FILLED);
-    pwrite(fd_,data,length,pos.base_offset()<<10);
+    if( pwrite(fd_,data,length,pos.base_offset()<<10) < 0 )
+        print_error( strerror( errno ) );
     complete_ += length;
     completek_++;
     if (pos.base_offset()==sizek_-1) {
