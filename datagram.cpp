@@ -7,6 +7,7 @@
  *
  */
 #include <iostream>
+#include <errno.h>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -169,7 +170,8 @@ SOCKET Datagram::Wait (tint usec) {
                 (*(sct.on_error))(sct.sock);
         }
     } else if (sel<0) {
-        print_error("select fails");
+        if( errno != EINTR )
+            print_error("select fails");
     }
     return sel;
 }
