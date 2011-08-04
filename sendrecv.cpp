@@ -83,7 +83,7 @@ bin64_t        Channel::DequeueHint () {
     uint64_t mass = 0;
     for(int i=0; i<hint_in_.size(); i++)
         mass += hint_in_[i].bin.width();
-    dprintf("%s #%u dequeued %s [%lli]\n",tintstr(),id_,send.str(),mass);
+    dprintf("%s #%u dequeued %s [%llu]\n",tintstr(),id_,send.str(),(unsigned long long int)mass);
     return send;
 }
 
@@ -157,7 +157,7 @@ void    Channel::AddHint (Datagram& dgram) {
         if (hint!=bin64_t::NONE) {
             dgram.Push8(SWIFT_HINT);
             dgram.Push32(hint);
-            dprintf("%s #%u +hint %s [%lli]\n",tintstr(),id_,hint.str(),hint_out_size_);
+            dprintf("%s #%u +hint %s [%llu]\n",tintstr(),id_,hint.str(),(unsigned long long int)hint_out_size_);
             hint_out_.push_back(hint);
             hint_out_size_ += hint.width();
         } else
@@ -263,7 +263,7 @@ void    Channel::Recv (Datagram& dgram) {
         rtt_avg_ = NOW - last_send_time_;
         dev_avg_ = rtt_avg_;
         dip_avg_ = rtt_avg_;
-        dprintf("%s #%u sendctrl rtt init %lli\n",tintstr(),id_,rtt_avg_);
+        dprintf("%s #%u sendctrl rtt init %lli\n",tintstr(),id_,(long long int)rtt_avg_);
     }
     bin64_t data = dgram.size() ? bin64_t::NONE : bin64_t::ALL;
     while (dgram.size()) {
@@ -364,7 +364,7 @@ void    Channel::OnAck (Datagram& dgram) {
     while (  ri<data_out_tmo_.size() && !data_out_tmo_[ri].bin.within(ackd_pos) )
         ri++;
     dprintf("%s #%u %cack %s %lli\n",tintstr(),id_,
-            di==data_out_.size()?'?':'-',ackd_pos.str(),peer_time);
+            di==data_out_.size()?'?':'-',ackd_pos.str(),(long long int)peer_time);
     if (di!=data_out_.size() && ri==data_out_tmo_.size()) { // not a retransmit
             // round trip time calculations
         tint rtt = NOW-data_out_[di].time;
@@ -383,7 +383,7 @@ void    Channel::OnAck (Datagram& dgram) {
         if (owd_min_bins_[owd_min_bin_]>owd)
             owd_min_bins_[owd_min_bin_] = owd;
         dprintf("%s #%u sendctrl rtt %lli dev %lli based on %s\n",
-                tintstr(),id_,rtt_avg_,dev_avg_,data_out_[di].bin.str());
+                tintstr(),id_,(long long int)rtt_avg_,(long long int)dev_avg_,data_out_[di].bin.str());
         ack_rcvd_recent_++;
         // early loss detection by packet reordering
         for (int re=0; re<di-MAX_REORDERING; re++) {
@@ -553,7 +553,7 @@ void    Channel::Loop (tint howlong) {
         } else {  // it's too early, wait
 
             tint towait = min(limit,send_time) - NOW;
-            dprintf("%s #0 waiting %lliusec\n",tintstr(),towait);
+            dprintf("%s #0 waiting %lliusec\n",tintstr(),(long long int)towait);
             Datagram::Wait(towait);
             if (sender)  // get back to that later
                 send_queue.push(tintbin(send_time,sender->id()));

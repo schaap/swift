@@ -120,13 +120,13 @@ void HttpGwFirstProgressCallback (int transfer, bin64_t bin) {
                 "Connection: keep-alive\r\n"\
                 "Content-Type: video/ogg\r\n"\
                 /*"X-Content-Duration: 32\r\n"*/\
-                "Content-Length: %lli\r\n"\
+                "Content-Length: %llu\r\n"\
                 "Accept-Ranges: none\r\n"\
                 "\r\n",
-                file_size);
+                (unsigned long long int)file_size);
             send(req->sink,response,strlen(response),0);
             req->tosend = file_size;
-            dprintf("%s @%i headers_sent size %lli\n",tintstr(),req->id,file_size);
+            dprintf("%s @%i headers_sent size %llu\n",tintstr(),req->id,(unsigned long long int)file_size);
         }
     }
     HttpGwSwiftProgressCallback(transfer,bin);
