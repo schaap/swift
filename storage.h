@@ -24,8 +24,6 @@ namespace swift {
         virtual void hashLeftRight( bin64_t root ) {
             setHash( root, Sha1Hash( getHash( root.left() ), getHash( root.right() ) ) );
         }
-
-        static HashStorage* NONE;
     };
 
 }

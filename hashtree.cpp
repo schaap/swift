@@ -85,7 +85,7 @@ std::string    Sha1Hash::hex() const {
 HashTree::HashTree (const char* filename, const Sha1Hash& root_hash, const char* hash_filename) :
 root_hash_(root_hash), fd_(0), data_recheck_(true),
 peak_count_(0), size_(0), sizek_(0),
-complete_(0), completek_(0), hash_storage_(HashStorage::NONE)
+complete_(0), completek_(0), hash_storage_(NULL)
 {
     fd_ = open(filename,OPENFLAGS,S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
     if (fd_<0) {
@@ -109,7 +109,7 @@ complete_(0), completek_(0), hash_storage_(HashStorage::NONE)
 HashTree::HashTree (const char* filename, const Sha1Hash& root_hash, HashStorage* hash_storage) :
 root_hash_(root_hash), fd_(0), data_recheck_(true),
 peak_count_(0), size_(0), sizek_(0),
-complete_(0), completek_(0), hash_storage_(HashStorage::NONE)
+complete_(0), completek_(0), hash_storage_(NULL)
 {
     fd_ = open(filename,OPENFLAGS,S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
     if (fd_<0) {
@@ -117,7 +117,7 @@ complete_(0), completek_(0), hash_storage_(HashStorage::NONE)
         print_error("cannot open the file");
         return;
     }
-    if( HashStorage::NONE == hash_storage ) {
+    if( !hash_storage ) {
         char hfn[1024] = "";    // Construct a filename for the hash storage and use that
         strcat(hfn, filename);
         strcat(hfn, ".mhash");
@@ -154,7 +154,7 @@ void            HashTree::Submit () {
         size_t rd = read(fd_,kilo,1<<10);
         if (rd<(1<<10) && i!=sizek_-1) {
             delete hash_storage_;
-            hash_storage_ = HashStorage::NONE;
+            hash_storage_ = NULL;
             return;
         }
         bin64_t pos(0,i);

@@ -66,7 +66,7 @@ public:
               const char* hash_filename);
     /// After offering the hash_storage to this constructor, it is governed by the HashTree object and will be deleted when deemed appropriate.
     HashTree (const char* file_name, const Sha1Hash& root=Sha1Hash::ZERO,
-              HashStorage* hash_storage=HashStorage::NONE);
+              HashStorage* hash_storage=NULL);
     
     /** Offer a hash; returns true if it verified; false otherwise.
      Once it cannot be verified (no sibling or parent), the hash
