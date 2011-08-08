@@ -101,9 +101,9 @@ void    swift::Loop (tint till) {
 
 
 
-int      swift::Open (const char* filename, const Sha1Hash& hash) {
+FileTransfer*   swift::Open (const char* filename, const Sha1Hash& hash) {
     FileTransfer* ft = new FileTransfer(filename, hash);
-    if (ft && ft->file().file_descriptor()) {
+    if (ft && ft->file().data_storage()) {
 
         /*if (FileTransfer::files.size()<fdes)  // FIXME duplication
             FileTransfer::files.resize(fdes);
@@ -113,18 +113,18 @@ int      swift::Open (const char* filename, const Sha1Hash& hash) {
         if (Channel::tracker!=Address())
             new Channel(ft);
 
-        return ft->file().file_descriptor();
+        return ft;
     } else {
         if (ft)
             delete ft;
-        return -1;
+        return NULL;
     }
 }
 
 
-void    swift::Close (int fd) {
-    if (fd<FileTransfer::files.size() && FileTransfer::files[fd])
-        delete FileTransfer::files[fd];
+void    swift::Close (FileTransfer* ft) {
+    if(ft)
+        delete ft;
 }
 
 
@@ -133,40 +133,39 @@ void    swift::AddPeer (Address address, const Sha1Hash& root) {
 }
 
 
-uint64_t  swift::Size (int fdes) {
-    if (FileTransfer::files.size()>fdes && FileTransfer::files[fdes])
-        return FileTransfer::files[fdes]->file().size();
-    else
+uint64_t  swift::Size (FileTransfer* trans) {
+    if (!trans)
         return 0;
+    else
+        return trans->file().size();
 }
 
 
-bool  swift::IsComplete (int fdes) {
-    if (FileTransfer::files.size()>fdes && FileTransfer::files[fdes])
-        return FileTransfer::files[fdes]->file().is_complete();
+bool  swift::IsComplete (FileTransfer* trans) {
+    if (!trans)
+        return false;
     else
-        return 0;
+        return trans->file().is_complete();
 }
 
 
-uint64_t  swift::Complete (int fdes) {
-    if (FileTransfer::files.size()>fdes && FileTransfer::files[fdes])
-        return FileTransfer::files[fdes]->file().complete();
-    else
+uint64_t  swift::Complete (FileTransfer* trans) {
+    if (!trans)
         return 0;
+    else
+        return trans->file().complete();
 }
 
 
-uint64_t  swift::SeqComplete (int fdes) {
-    if (FileTransfer::files.size()>fdes && FileTransfer::files[fdes])
-        return FileTransfer::files[fdes]->file().seq_complete();
-    else
+uint64_t  swift::SeqComplete (FileTransfer* trans) {
+    if (!trans)
         return 0;
+    else
+        return trans->file().seq_complete();
 }
 
 
-const Sha1Hash& swift::RootMerkleHash (int file) {
-    FileTransfer* trans = FileTransfer::file(file);
+const Sha1Hash& swift::RootMerkleHash (FileTransfer* trans) {
     if (!trans)
         return Sha1Hash::ZERO;
     return trans->file().root_hash();

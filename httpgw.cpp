@@ -14,12 +14,12 @@ const char * HTTPGW_HEADERS[HTTPGW_MAX_HEADER] = {
 
 
 struct http_gw_t {
-    int      id;
-    uint64_t offset;
-    uint64_t tosend;
-    int      transfer;
-    SOCKET   sink;
-    char*    headers[HTTPGW_MAX_HEADER];
+    int             id;
+    uint64_t        offset;
+    uint64_t        tosend;
+    FileTransfer*   transfer;
+    SOCKET          sink;
+    char*           headers[HTTPGW_MAX_HEADER];
 } http_requests[HTTPGW_MAX_CLIENT];
 
 
@@ -59,7 +59,7 @@ void HttpGwMayWriteCallback (SOCKET sink) {
     if (complete>req->offset) { // send data
         char buf[1<<12];
         uint64_t tosend = std::min((uint64_t)1<<12,complete-req->offset);
-        size_t rd = pread(req->transfer,buf,tosend,req->offset); // hope it is cached
+        size_t rd = req->transfer->file().data_storage()->read(req->offset, buf, tosend); // hope it is cached
         if (rd<0) {
             HttpGwCloseConnection(sink);
             return;
@@ -90,7 +90,7 @@ void HttpGwMayWriteCallback (SOCKET sink) {
 }
 
 
-void HttpGwSwiftProgressCallback (int transfer, bin64_t bin) {
+void HttpGwSwiftProgressCallback (FileTransfer* transfer, bin64_t bin) {
     dprintf("%s @A pcb: %s\n",tintstr(),bin.str());
     for (int httpc=0; httpc<http_gw_reqs_open; httpc++)
         if (http_requests[httpc].transfer==transfer)
@@ -105,11 +105,11 @@ void HttpGwSwiftProgressCallback (int transfer, bin64_t bin) {
 }
 
 
-void HttpGwFirstProgressCallback (int transfer, bin64_t bin) {
+void HttpGwFirstProgressCallback (FileTransfer* transfer, bin64_t bin) {
     if (bin!=bin64_t(0,0)) // need the first packet
         return;
-    swift::RemoveProgressCallback(transfer,&HttpGwFirstProgressCallback);
-    swift::AddProgressCallback(transfer,&HttpGwSwiftProgressCallback,0);
+    transfer->RemoveProgressCallback(&HttpGwFirstProgressCallback);
+    transfer->AddProgressCallback(&HttpGwSwiftProgressCallback,0);
     for (int httpc=0; httpc<http_gw_reqs_open; httpc++) {
         http_gw_t * req = http_requests + httpc;
         if (req->transfer==transfer && req->tosend==0) { // FIXME states
@@ -180,14 +180,14 @@ void HttpGwNewRequestCallback (SOCKET http_conn){
     dprintf("%s @%i demands %s\n",tintstr(),req->id,hash);
     // initiate transmission
     Sha1Hash root_hash = Sha1Hash(true,hash);
-    int file = swift::Find(root_hash);
-    if (file==-1)
-        file = swift::Open(hash,root_hash);
-    req->transfer = file;
-    if (swift::Size(file)) {
-        HttpGwFirstProgressCallback(file,bin64_t(0,0));
+    FileTransfer* trans = swift::Find(root_hash);
+    if (!trans)
+        trans = swift::Open(hash,root_hash);
+    req->transfer = trans;
+    if (swift::Size(trans)) {
+        HttpGwFirstProgressCallback(trans,bin64_t(0,0));
     } else {
-        swift::AddProgressCallback(file,&HttpGwFirstProgressCallback,0);
+        trans->AddProgressCallback(&HttpGwFirstProgressCallback,0);
         sckrwecb_t install (http_conn,NULL,NULL,HttpGwCloseConnection);
         swift::Datagram::Listen3rdPartySocket(install);
     }

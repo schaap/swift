@@ -9,9 +9,22 @@ namespace swift {
 
     class DataStorage {
     public:
-        DataStorage (const Sha1Hash& id, size_t size);
-        virtual size_t    ReadData (bin64_t pos,uint8_t** buf) {return -1;}
-        virtual size_t    WriteData (bin64_t pos, uint8_t* buf, size_t len) {return -1;};
+        //DataStorage( const Sha1Hash& id, size_t size ); //?
+        /// read from start or where last non-positional write or read ended
+        virtual size_t read( char* buf, size_t len ) = 0;
+        /// read from given position
+        virtual size_t read( off_t pos, char* buf, size_t len ) = 0;
+        /// read from given position
+        virtual size_t read( bin64_t pos, char* buf, size_t len ) = 0;
+        /// write to start or where last non-positional write or read ended
+        virtual size_t write( const char* buf, size_t len) = 0;
+        /// write to given position
+        virtual size_t write( off_t pos, const char* buf, size_t len ) = 0;
+        /// write to given position
+        virtual size_t write( bin64_t pos, const char* buf, size_t len ) = 0;
+        virtual size_t size() = 0;
+        virtual bool setSize( size_t len ) = 0;
+        virtual bool valid() = 0;
     };
 
     class HashStorage {

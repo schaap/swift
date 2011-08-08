@@ -204,7 +204,7 @@ bin64_t        Channel::AddData (Datagram& dgram) {
     dgram.Push32(tosend.to32());
 
     uint8_t buf[1024];
-    size_t r = pread(file().file_descriptor(),buf,1024,tosend.base_offset()<<10);
+    size_t r = file().data_storage()->read( tosend, (char*)buf, 1024 );
     // TODO: corrupted data, retries, caching
     if (r<0) {
         print_error("error on reading");
@@ -327,9 +327,7 @@ bin64_t Channel::OnData (Datagram& dgram) {  // TODO: HAVE NONE for corrupted da
     if (!ok)
         return bin64_t::NONE;
     bin64_t cover = transfer().ack_out().cover(pos);
-    for(int i=0; i<transfer().cb_installed; i++)
-        if (cover.layer()>=transfer().cb_agg[i])
-            transfer().callbacks[i](transfer().fd(),cover);  // FIXME
+    transfer().callCallbacks(cover);
     data_in_.bin = pos;
     if (pos!=bin64_t::NONE) {
         if (last_data_in_time_) {

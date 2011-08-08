@@ -29,13 +29,12 @@ TEST(Connection,CwndTest) {
     int sock1 = swift::Listen(7001);
 	ASSERT_TRUE(sock1>=0);
 
-	int file = swift::Open("doc/sofi.jpg");
-    FileTransfer* fileobj = FileTransfer::file(file);
+	FileTransfer* fileobj = swift::Open("doc/sofi.jpg");
     //FileTransfer::instance++;
 
     swift::SetTracker(Address("127.0.0.1",7001));
 
-	int copy = swift::Open("doc/sofi-copy.jpg",fileobj->root_hash());
+	FileTransfer* copy = swift::Open("doc/sofi-copy.jpg",fileobj->root_hash());
 
 	swift::Loop(TINT_SEC);
 
@@ -44,7 +43,7 @@ TEST(Connection,CwndTest) {
         swift::Loop(TINT_SEC);
     ASSERT_EQ(size,swift::SeqComplete(copy));
 
-	swift::Close(file);
+	swift::Close(fileobj);
 	swift::Close(copy);
 
 	swift::Shutdown(sock1);

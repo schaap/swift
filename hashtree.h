@@ -36,11 +36,8 @@ class HashTree {
     Sha1Hash        peak_hashes_[64];
     bin64_t         peaks_[64];
     int             peak_count_;
-    /** File descriptor to put hashes to */
-    int             fd_;
-    //int             hash_fd_;  // @deprecated
     /** Stores for data and hashes */
-    //DataStorage     data_storage_;
+    DataStorage*    data_storage_;
     HashStorage*    hash_storage_;
     /** Whether to re-hash files. */
     bool            data_recheck_;
@@ -78,7 +75,7 @@ public:
     /** For live streaming. Not implemented yet. */
     int             AppendData (char* data, int length) ;
     
-    int             file_descriptor () const { return fd_; }
+    DataStorage*    data_storage () const { return data_storage_; }
     /** Returns the number of peaks (read on peak hashes). */
     int             peak_count () const { return peak_count_; }
     /** Returns the i-th peak's bin number. */

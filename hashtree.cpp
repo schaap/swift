@@ -16,6 +16,7 @@
 #include <errno.h>
 #include "compat.h"
 #include "ext/filehashstorage.h"
+#include "ext/filedatastorage.h"
 
 #ifdef _WIN32
 #define OPENFLAGS         O_RDWR|O_CREAT|_O_BINARY
@@ -83,23 +84,19 @@ std::string    Sha1Hash::hex() const {
 /**     H a s h   t r e e       */
 
 HashTree::HashTree (const char* filename, const Sha1Hash& root_hash, const char* hash_filename) :
-root_hash_(root_hash), fd_(0), data_recheck_(true),
+root_hash_(root_hash), data_recheck_(true),
 peak_count_(0), size_(0), sizek_(0),
-complete_(0), completek_(0), hash_storage_(NULL)
+complete_(0), completek_(0), hash_storage_(NULL),
+data_storage_(NULL)
 {
-    fd_ = open(filename,OPENFLAGS,S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
-    if (fd_<0) {
-        fd_ = 0;
-        print_error("cannot open the file");
+    data_storage_ = new FileDataStorage(filename);
+    if( !data_storage_->valid() )
         return;
-    }
-    char hfn[1024];
-    strcpy(hfn,hash_filename);
-    hash_storage_ = new FileHashStorage(hfn);
+    hash_storage_ = new FileHashStorage(hash_filename);
     if( !hash_storage_->valid() )
         return;
     if (root_hash_==Sha1Hash::ZERO) { // fresh submit, hash it
-        assert(file_size(fd_));
+        assert(data_storage_->size());
         Submit();
     } else {
         RecoverProgress();
@@ -107,16 +104,14 @@ complete_(0), completek_(0), hash_storage_(NULL)
 }
 
 HashTree::HashTree (const char* filename, const Sha1Hash& root_hash, HashStorage* hash_storage) :
-root_hash_(root_hash), fd_(0), data_recheck_(true),
+root_hash_(root_hash), data_recheck_(true),
 peak_count_(0), size_(0), sizek_(0),
-complete_(0), completek_(0), hash_storage_(NULL)
+complete_(0), completek_(0), hash_storage_(NULL),
+data_storage_(NULL)
 {
-    fd_ = open(filename,OPENFLAGS,S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
-    if (fd_<0) {
-        fd_ = 0;
-        print_error("cannot open the file");
+    data_storage_ = new FileDataStorage(filename);
+    if( !data_storage_->valid() )
         return;
-    }
     if( !hash_storage ) {
         char hfn[1024] = "";    // Construct a filename for the hash storage and use that
         strcat(hfn, filename);
@@ -134,7 +129,7 @@ complete_(0), completek_(0), hash_storage_(NULL)
         hash_storage_ = hash_storage;
     }
     if (root_hash_==Sha1Hash::ZERO) { // fresh submit, hash it
-        assert(file_size(fd_));
+        assert(data_storage_->size());
         Submit();
     } else {
         RecoverProgress();
@@ -142,7 +137,7 @@ complete_(0), completek_(0), hash_storage_(NULL)
 }
 
 void            HashTree::Submit () {
-    size_ = file_size(fd_);
+    size_ = data_storage_->size();
     sizek_ = (size_ + 1023) >> 10;
     peak_count_ = bin64_t::peaks(sizek_,peaks_);
     if( !hash_storage_->setHashCount( sizek_ ) ) {
@@ -151,7 +146,7 @@ void            HashTree::Submit () {
     }
     for (size_t i=0; i<sizek_; i++) {
         char kilo[1<<10];
-        size_t rd = read(fd_,kilo,1<<10);
+        size_t rd = data_storage_->read(kilo,1<<10);
         if (rd<(1<<10) && i!=sizek_-1) {
             delete hash_storage_;
             hash_storage_ = NULL;
@@ -177,7 +172,7 @@ void            HashTree::Submit () {
 /** Basically, simulated receiving every single packet, except
  for some optimizations. */
 void            HashTree::RecoverProgress () {
-    size_t size = file_size(fd_);
+    size_t size = data_storage_->size();
     size_t sizek = (size + 1023) >> 10;
     bin64_t peaks[64];
     int peak_count = bin64_t::peaks(sizek,peaks);
@@ -198,7 +193,7 @@ void            HashTree::RecoverProgress () {
         bin64_t pos(0,p);
         if(hash_storage_->getHash(pos)==Sha1Hash::ZERO)
             continue;
-        size_t rd = read(fd_,buf,1<<10);
+        size_t rd = data_storage_->read(buf,1<<10);
         if (rd!=(1<<10) && p!=packet_size()-1)
             break;
         if (rd==(1<<10) && !memcmp(buf, zeros, rd) &&
@@ -239,9 +234,9 @@ bool            HashTree::OfferPeakHash (bin64_t pos, const Sha1Hash& hash) {
     completek_ = complete_ = 0;
     sizek_ = (size_ + 1023) >> 10;
 
-    size_t cur_size = file_size(fd_);
+    size_t cur_size = data_storage_->size();
     if ( cur_size<=(sizek_-1)<<10  || cur_size>sizek_<<10 ) {
-        if (file_resize(fd_, size_)) {
+        if (data_storage_->setSize(size_)) {
             print_error("cannot set file size\n");
             size_=0; // remain in the 0-state
             return false;
@@ -338,14 +333,14 @@ bool            HashTree::OfferData (bin64_t pos, const char* data, size_t lengt
 
     //printf("g %lli %s\n",(uint64_t)pos,hash.hex().c_str());
     ack_out_.set(pos,binmap_t::FILLED);
-    if( pwrite(fd_,data,length,pos.base_offset()<<10) < 0 )
+    if (data_storage_->write(pos,data,length) < 0)
         print_error( strerror( errno ) );
     complete_ += length;
     completek_++;
     if (pos.base_offset()==sizek_-1) {
         size_ = ((sizek_-1)<<10) + length;
-        if (file_size(fd_)!=size_)
-            file_resize(fd_,size_);
+        if (data_storage_->size()!=size_)
+            data_storage_->setSize(size_);
     }
     return true;
 }
@@ -360,8 +355,8 @@ uint64_t      HashTree::seq_complete () {
 }
 
 HashTree::~HashTree () {
-    if (fd_)
-        close(fd_);
+    if (data_storage_)
+        delete data_storage_;
     if (hash_storage_)
         delete hash_storage_;
 }

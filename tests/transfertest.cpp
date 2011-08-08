@@ -95,7 +95,7 @@ TEST(TransferTest,TransferFile) {
         ASSERT_NE(bin64_t::NONE,next);
         ASSERT_TRUE(next.base_offset()<5);
         uint8_t buf[1024];         //size_t len = seed->storer->ReadData(next,&buf);
-        size_t len = pread(seed->file_descriptor(),buf,1024,next.base_offset()<<10);
+        size_t len = seed->data_storage()->read(next,(char*)buf,1024);
         bin64_t sibling = next.sibling();
         if (sibling.base_offset()<seed->packet_size())
             leech->OfferHash(sibling, seed->hash(sibling));

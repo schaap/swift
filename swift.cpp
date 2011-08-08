@@ -127,15 +127,15 @@ int main (int argc, char** argv) {
     if (root_hash!=Sha1Hash::ZERO && !filename)
         filename = strdup(root_hash.hex().c_str());
 
-    int file = -1;
+    FileTransfer* ft = NULL;
     if (filename) {
-        file = Open(filename,root_hash);
-        if (file<=0)
+        ft = Open(filename,root_hash);
+        if (!ft)
             quit("cannot open file %s",filename);
-        printf("Root hash: %s\n", RootMerkleHash(file).hex().c_str());
+        printf("Root hash: %s\n", RootMerkleHash(ft).hex().c_str());
     }
 
-    if (bindaddr==Address() && file==-1 && http_gw==Address()) {
+    if (bindaddr==Address() && ft==NULL && http_gw==Address()) {
         fprintf(stderr,"Usage:\n");
         fprintf(stderr,"  -h, --hash\troot Merkle hash for the transmission\n");
         fprintf(stderr,"  -f, --file\tname of file to use (root hash by default)\n");
@@ -150,22 +150,22 @@ int main (int argc, char** argv) {
 
     tint start_time = NOW;
     
-    while ( (file>=0 && !IsComplete(file)) ||
+    while ( (ft && !IsComplete(ft)) ||
             (start_time+wait_time>NOW)   ) {
         swift::Loop(TINT_SEC);
-        if (report_progress && file>=0) {
+        if (report_progress && ft) {
             fprintf(stderr,
                     "%s %lli of %lli (seq %lli) %lli dgram %lli bytes up, "\
                     "%lli dgram %lli bytes down\n",
-                IsComplete(file) ? "DONE" : "done",
-                Complete(file), Size(file), SeqComplete(file),
+                IsComplete(ft) ? "DONE" : "done",
+                Complete(ft), Size(ft), SeqComplete(ft),
                 Datagram::dgrams_up, Datagram::bytes_up,
                 Datagram::dgrams_down, Datagram::bytes_down );
         }
     }
     
-    if (file!=-1)
-        Close(file);
+    if (ft)
+        Close(ft);
     
     if (Channel::debug_file)
         fclose(Channel::debug_file);

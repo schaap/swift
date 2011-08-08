@@ -123,7 +123,8 @@ namespace swift {
     class PiecePicker;
     class CongestionController;
     class PeerSelector;
-    typedef void (*ProgressCallback) (int transfer, bin64_t bin);
+    class FileTransfer;
+    typedef void (*ProgressCallback) (FileTransfer* ft , bin64_t bin);
 
 
     /** A class representing single file transfer. */
@@ -163,14 +164,19 @@ namespace swift {
         int             channel_count () const { return hs_in_.size(); }
         /** Hash tree checked file; all the hashes and data are kept here. */
         HashTree&       file() { return file_; }
-        /** File descriptor for the data file. */
-        int             fd () const { return file_.file_descriptor(); }
+        /** Data storage for the data file. */
+        DataStorage*    data_storage () const { return file_.data_storage(); }
         /** Root SHA1 hash of the transfer (and the data file). */
         const Sha1Hash& root_hash () const { return file_.root_hash(); }
+
+        void AddProgressCallback (ProgressCallback cb,uint8_t agg);
+        void RemoveProgressCallback (ProgressCallback cb);
 
     private:
 
         static std::vector<FileTransfer*> files;
+
+        int             files_index_;
 
         HashTree        file_;
 
@@ -191,21 +197,20 @@ namespace swift {
         ProgressCallback callbacks[SWFT_MAX_TRANSFER_CB];
         uint8_t         cb_agg[SWFT_MAX_TRANSFER_CB];
         int             cb_installed;
+        void            callCallbacks(bin64_t& cover);
 
     public:
         void            OnDataIn (bin64_t pos);
         void            OnPexIn (const Address& addr);
 
         friend class Channel;
-        friend uint64_t  Size (int fdes);
-        friend bool      IsComplete (int fdes);
-        friend uint64_t  Complete (int fdes);
-        friend uint64_t  SeqComplete (int fdes);
-        friend int     Open (const char* filename, const Sha1Hash& hash) ;
-        friend void    Close (int fd) ;
-        friend void AddProgressCallback (int transfer,ProgressCallback cb,uint8_t agg);
-        friend void RemoveProgressCallback (int transfer,ProgressCallback cb);
-        friend void ExternallyRetrieved (int transfer,bin64_t piece);
+        friend uint64_t         Size (FileTransfer* trans);
+        friend bool             IsComplete (FileTransfer* trans);
+        friend uint64_t         Complete (FileTransfer* trans);
+        friend uint64_t         SeqComplete (FileTransfer* trans);
+        friend FileTransfer*    Open (const char* filename, const Sha1Hash& hash) ;
+        friend void             Close (FileTransfer* trans) ;
+        friend void             ExternallyRetrieved (int transfer,bin64_t piece);
     };
 
 
@@ -403,11 +408,11 @@ namespace swift {
         static Address  tracker;
         static std::vector<Channel*> channels;
 
-        friend int      Listen (Address addr);
-        friend void     Shutdown (int sock_des);
-        friend void     AddPeer (Address address, const Sha1Hash& root);
-        friend void     SetTracker(const Address& tracker);
-        friend int      Open (const char*, const Sha1Hash&) ; // FIXME
+        friend int              Listen (Address addr);
+        friend void             Shutdown (int sock_des);
+        friend void             AddPeer (Address address, const Sha1Hash& root);
+        friend void             SetTracker(const Address& tracker);
+        friend FileTransfer*    Open (const char*, const Sha1Hash&) ; // FIXME
 
     };
 
@@ -424,11 +429,11 @@ namespace swift {
 
     /** Open a file, start a transmission; fill it with content for a given root hash;
         in case the hash is omitted, the file is a fresh submit. */
-    int     Open (const char* filename, const Sha1Hash& hash=Sha1Hash::ZERO) ;
+    FileTransfer*   Open (const char* filename, const Sha1Hash& hash=Sha1Hash::ZERO) ;
     /** Get the root hash for the transmission. */
-    const Sha1Hash& RootMerkleHash (int file) ;
+    const Sha1Hash& RootMerkleHash (FileTransfer* ft);
     /** Close a file and a transmission. */
-    void    Close (int fd) ;
+    void    Close (FileTransfer* ft);
     /** Add a possible peer which participares in a given transmission. In the case
         root hash is zero, the peer might be talked to regarding any transmission
         (likely, a tracker, cache or an archive). */
@@ -438,20 +443,18 @@ namespace swift {
 
     /** Returns size of the file in bytes, 0 if unknown. Might be rounded up to a kilobyte
         before the transmission is complete. */
-    uint64_t  Size (int fdes);
+    uint64_t  Size (FileTransfer* trans);
     /** Returns the amount of retrieved and verified data, in bytes.
         A 100% complete transmission has Size()==Complete(). */
-    uint64_t  Complete (int fdes);
-    bool      IsComplete (int fdes);
+    uint64_t  Complete (FileTransfer* trans);
+    bool      IsComplete (FileTransfer* trans);
     /** Returns the number of bytes that are complete sequentially, starting from the
         beginning, till the first not-yet-retrieved packet. */
-    uint64_t  SeqComplete (int fdes);
+    uint64_t  SeqComplete (FileTransfer* trans);
     /***/
-    int       Find (Sha1Hash hash);
+    FileTransfer*   Find (Sha1Hash hash);
 
-    void AddProgressCallback (int transfer,ProgressCallback cb,uint8_t agg);
-    void RemoveProgressCallback (int transfer,ProgressCallback cb);
-    void ExternallyRetrieved (int transfer,bin64_t piece);
+    void ExternallyRetrieved (FileTransfer* transfer,bin64_t piece);
 
     //uint32_t Width (const tbinvec& v);
 
