@@ -16,10 +16,6 @@ using namespace swift;
 FileHashStorage::FileHashStorage( const char* filename ) :
     HashStorage(), hash_fd_(0), hashes_(0)
 {
-    if( filename == NULL ) {
-        print_error( "NULL filename in FileHashStorage" );
-        return;
-    }
     hash_fd_ = open( filename, OPENFLAGS, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH );
     if( hash_fd_ < 0 ) {
         hash_fd_ = 0;

@@ -82,7 +82,6 @@ std::string    Sha1Hash::hex() const {
 
 /**     H a s h   t r e e       */
 
-
 HashTree::HashTree (const char* filename, const Sha1Hash& root_hash, const char* hash_filename) :
 root_hash_(root_hash), fd_(0), data_recheck_(true),
 peak_count_(0), size_(0), sizek_(0),
@@ -94,14 +93,10 @@ complete_(0), completek_(0), hash_storage_(HashStorage::NONE)
         print_error("cannot open the file");
         return;
     }
-    char hfn[1024] = "";
-    if (!hash_filename) {
-        strcat(hfn, filename);
-        strcat(hfn, ".mhash");
-    } else
-        strcpy(hfn,hash_filename);
-    hash_storage_ = FileHashStorage(hfn);
-    if( !hash_storage_.valid() )
+    char hfn[1024];
+    strcpy(hfn,hash_filename);
+    hash_storage_ = new FileHashStorage(hfn);
+    if( !hash_storage_->valid() )
         return;
     if (root_hash_==Sha1Hash::ZERO) { // fresh submit, hash it
         assert(file_size(fd_));
@@ -111,10 +106,10 @@ complete_(0), completek_(0), hash_storage_(HashStorage::NONE)
     } // else  LoadComplete()
 }
 
-HashTree::HashTree (const char* filename, const Sha1Hash& root_hash, const HashStorage& hash_storage) :
+HashTree::HashTree (const char* filename, const Sha1Hash& root_hash, HashStorage* hash_storage) :
 root_hash_(root_hash), fd_(0), data_recheck_(true),
 peak_count_(0), size_(0), sizek_(0),
-complete_(0), completek_(0)
+complete_(0), completek_(0), hash_storage_(HashStorage::NONE)
 {
     fd_ = open(filename,OPENFLAGS,S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
     if (fd_<0) {
@@ -122,16 +117,20 @@ complete_(0), completek_(0)
         print_error("cannot open the file");
         return;
     }
-    if( hash_storage == HashStorage::NONE ) {
+    if( HashStorage::NONE == hash_storage ) {
+        fprintf( stderr, "Detected default storage\n" );
         char hfn[1024] = "";    // Construct a filename for the hash storage and use that
         strcat(hfn, filename);
         strcat(hfn, ".mhash");
-        hash_storage_ = FileHashStorage(hfn);
-        if( !hash_storage_.valid() )
+        hash_storage_ = new FileHashStorage(hfn);
+        if( !hash_storage_->valid() ) {
+            fprintf( stderr, "Detected new but invalid storage\n" );
             return;
+        }
     }
     else {
-        if( !hash_storage_.valid() ) {
+        if( !hash_storage->valid() ) {
+            delete hash_storage;
             print_error( "Invalid hash storage" ); // FIXME: Won't work
             return;
         }
@@ -149,7 +148,7 @@ void            HashTree::Submit () {
     size_ = file_size(fd_);
     sizek_ = (size_ + 1023) >> 10;
     peak_count_ = bin64_t::peaks(sizek_,peaks_);
-    if( !hash_storage_.setHashCount( sizek_ ) ) {
+    if( !hash_storage_->setHashCount( sizek_ ) ) {
         size_ = sizek_ = complete_ = completek_ = 0;
         return;
     }
@@ -157,11 +156,12 @@ void            HashTree::Submit () {
         char kilo[1<<10];
         size_t rd = read(fd_,kilo,1<<10);
         if (rd<(1<<10) && i!=sizek_-1) {
+            delete hash_storage_;
             hash_storage_ = HashStorage::NONE;
             return;
         }
         bin64_t pos(0,i);
-        hash_storage_.setHash(pos,Sha1Hash(kilo,rd));
+        hash_storage_->setHash(pos,Sha1Hash(kilo,rd));
         ack_out_.set(pos);
         complete_+=rd;
         completek_++;
@@ -169,8 +169,8 @@ void            HashTree::Submit () {
     for (int p=0; p<peak_count_; p++) {
         if (!peaks_[p].is_base())
             for(bin64_t b=peaks_[p].left_foot().parent(); b.within(peaks_[p]); b=b.next_dfsio(1))
-                hash_storage_.hashLeftRight(b);
-        peak_hashes_[p] = hash_storage_.getHash(peaks_[p]);
+                hash_storage_->hashLeftRight(b);
+        peak_hashes_[p] = hash_storage_->getHash(peaks_[p]);
     }
 
     root_hash_ = DeriveRoot();
@@ -186,7 +186,7 @@ void            HashTree::RecoverProgress () {
     int peak_count = bin64_t::peaks(sizek,peaks);
     for(int i=0; i<peak_count; i++) {
         Sha1Hash peak_hash;
-        peak_hash = hash_storage_.getHash(peaks[i]);
+        peak_hash = hash_storage_->getHash(peaks[i]);
         OfferPeakHash(peaks[i], peak_hash);
     }
     if (!this->size())
@@ -199,13 +199,13 @@ void            HashTree::RecoverProgress () {
     for(int p=0; p<packet_size(); p++) {
         char buf[1<<10];
         bin64_t pos(0,p);
-        if(hash_storage_.getHash(pos)==Sha1Hash::ZERO)
+        if(hash_storage_->getHash(pos)==Sha1Hash::ZERO)
             continue;
         size_t rd = read(fd_,buf,1<<10);
         if (rd!=(1<<10) && p!=packet_size()-1)
             break;
         if (rd==(1<<10) && !memcmp(buf, zeros, rd) &&
-                hash_storage_.getHash(pos)!=kilo_zero) // FIXME
+                hash_storage_->getHash(pos)!=kilo_zero) // FIXME
             continue;
         if ( data_recheck_ && !OfferHash(pos, Sha1Hash(buf,rd)) )
             continue;
@@ -252,10 +252,10 @@ bool            HashTree::OfferPeakHash (bin64_t pos, const Sha1Hash& hash) {
     }
 
     // tell the storage how big the file really is, for more efficient usage
-    hash_storage_.setHashCount( sizek_ );
+    hash_storage_->setHashCount( sizek_ );
 
     for(int i=0; i<peak_count_; i++)
-        hash_storage.setHash(peaks_[i],peak_hashes_[i]);
+        hash_storage_->setHash(peaks_[i],peak_hashes_[i]);
     return true;
 }
 
@@ -303,20 +303,20 @@ bool            HashTree::OfferHash (bin64_t pos, const Sha1Hash& hash) {
     if (peak==bin64_t::NONE)
         return false;
     if (peak==pos)
-        return hash == hash_storage_.getHash(pos);
+        return hash == hash_storage_->getHash(pos);
     if (ack_out_.get(pos.parent())!=binmap_t::EMPTY)
-        return hash==hash_storage_.getHash(pos); // have this hash already, even accptd data
-    hash_storage_.setHash( pos, hash );
+        return hash==hash_storage_->getHash(pos); // have this hash already, even accptd data
+    hash_storage_->setHash( pos, hash );
     if (!pos.is_base())
         return false; // who cares?
     bin64_t p = pos;
     Sha1Hash uphash = hash;
     while ( p!=peak && ack_out_.get(p)==binmap_t::EMPTY ) {
-        hash_storage.setHash(p, uphash);
+        hash_storage_->setHash(p, uphash);
         p = p.parent();
-        uphash = Sha1Hash(hash_storage.getHash(p.left()),hash_storage.getHash(p.right())) ;
+        uphash = Sha1Hash(hash_storage_->getHash(p.left()),hash_storage_->getHash(p.right())) ;
     }// walk to the nearest proven hash
-    return uphash==hash_storage.getHash(p);
+    return uphash==hash_storage_->getHash(p);
 }
 
 
@@ -365,5 +365,7 @@ uint64_t      HashTree::seq_complete () {
 HashTree::~HashTree () {
     if (fd_)
         close(fd_);
+    if (hash_storage_)
+        delete hash_storage_;
 }
 
