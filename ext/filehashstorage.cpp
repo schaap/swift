@@ -54,6 +54,7 @@ bool FileHashStorage::setHashCount( int count ) {
         print_error( "mmap failed" );
         return false;
     }
+    return true;
 }
 
 bool FileHashStorage::setHash( bin64_t number, const Sha1Hash& hash ) {

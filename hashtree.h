@@ -32,7 +32,6 @@ class HashTree {
 
     /** Merkle hash tree: root */
     Sha1Hash        root_hash_;
-    Sha1Hash        *hashes_;
     /** Merkle hash tree: peak hashes */
     Sha1Hash        peak_hashes_[64];
     bin64_t         peaks_[64];
@@ -89,7 +88,7 @@ public:
     /** Return the peak bin the given bin belongs to. */
     bin64_t         peak_for (bin64_t pos) const;
     /** Return a (Merkle) hash for the given bin. */
-    const Sha1Hash& hash (bin64_t pos) const {return hashes_[pos];}
+    const Sha1Hash& hash (bin64_t pos) const {return hash_storage_->getHash(pos);}
     /** Give the root hash, which is effectively an identifier of this file. */
     const Sha1Hash& root_hash () const { return root_hash_; }
     /** Get file size, in bytes. */

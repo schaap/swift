@@ -118,15 +118,12 @@ complete_(0), completek_(0), hash_storage_(HashStorage::NONE)
         return;
     }
     if( HashStorage::NONE == hash_storage ) {
-        fprintf( stderr, "Detected default storage\n" );
         char hfn[1024] = "";    // Construct a filename for the hash storage and use that
         strcat(hfn, filename);
         strcat(hfn, ".mhash");
         hash_storage_ = new FileHashStorage(hfn);
-        if( !hash_storage_->valid() ) {
-            fprintf( stderr, "Detected new but invalid storage\n" );
+        if( !hash_storage_->valid() )
             return;
-        }
     }
     else {
         if( !hash_storage->valid() ) {

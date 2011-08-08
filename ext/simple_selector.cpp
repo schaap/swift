@@ -8,7 +8,7 @@
  */
 
 #include <queue>
-#include "swift.h"
+#include "../swift.h"
 
 using namespace swift;
 

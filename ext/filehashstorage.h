@@ -1,7 +1,7 @@
 #ifndef FILEHASHSTORAGE_H
 #define FILEHASHSTORAGE_H
 
-#include "swift.h"
+#include "../swift.h"
 
 namespace swift {
 
