@@ -48,7 +48,7 @@ class HashTree {
     size_t          complete_;
     size_t          completek_;
     binmap_t            ack_out_;
-    
+
 protected:
     
     void            Submit();

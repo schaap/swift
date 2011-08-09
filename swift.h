@@ -137,6 +137,7 @@ namespace swift {
          *  @param root_hash    the root hash of the file; zero hash if the file
                                 is newly submitted */
         FileTransfer(const char *file_name, const Sha1Hash& root_hash=Sha1Hash::ZERO);
+        FileTransfer(DataStorage* data_storage, const Sha1Hash& root_hash=Sha1Hash::ZERO, HashStorage* hash_storage = NULL);
 
         /**    Close everything. */
         ~FileTransfer();
@@ -198,6 +199,8 @@ namespace swift {
         uint8_t         cb_agg[SWFT_MAX_TRANSFER_CB];
         int             cb_installed;
         void            callCallbacks(bin64_t& cover);
+
+        void            initialize();
 
     public:
         void            OnDataIn (bin64_t pos);
@@ -323,6 +326,8 @@ namespace swift {
             return i<channels.size()?channels[i]:NULL;
         }
         static void CloseTransfer (FileTransfer* trans);
+
+        static const Address& Tracker() { return tracker; }
 
     protected:
         /** Channel id: index in the channel array. */

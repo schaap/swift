@@ -19,13 +19,13 @@ bool MemoryHashStorage::valid( ) {
 }
 
 bool MemoryHashStorage::setHashCount( int count ) {
-    hashes_.reserve( count );
-    return hashes_.capacity() == count;
+    hashes_.resize( 2*count );
+    return hashes_.capacity() == 2*count;
 }
 
 bool MemoryHashStorage::setHash( bin64_t number, const Sha1Hash& hash ) {
     if( (int) number > hashes_.capacity() ) {
-        hashes_.reserve( number );
+        hashes_.resize( number+1 );
         if( (int) number > hashes_.capacity() )
             return false;
     }

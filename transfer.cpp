@@ -24,6 +24,16 @@ std::vector<FileTransfer*> FileTransfer::files(20);
 FileTransfer::FileTransfer (const char* filename, const Sha1Hash& _root_hash) :
     file_(filename,_root_hash), hs_in_offset_(0), cb_installed(0), files_index_(-1)
 {
+    initialize();
+}
+
+FileTransfer::FileTransfer (DataStorage* dataStorage, const Sha1Hash& root_hash, HashStorage* hashStorage) :
+    file_(dataStorage, root_hash, hashStorage), hs_in_offset_(0), cb_installed(0), files_index_(-1)
+{
+    initialize();
+}
+
+void FileTransfer::initialize() {
     // NOTE: This should probably be guarded against multithreaded access faults (very easy to break this array)
     for(int i=0; i<files.size();i++) {
         if(!files[i]) {

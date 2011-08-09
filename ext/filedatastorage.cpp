@@ -22,6 +22,10 @@ FileDataStorage::FileDataStorage( const char* filename ) : fd_(0) {
     filename_ = strdup( filename );
 }
 
+FileDataStorage::FileDataStorage() : fd_(0) {
+    // Constructor for subclasses
+}
+
 FileDataStorage::~FileDataStorage( ) {
     if( fd_ )
         close( fd_ );

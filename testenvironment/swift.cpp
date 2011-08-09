@@ -18,6 +18,7 @@
 
 #include "compat.h"
 #include "swift.h"
+#include "fileoffsetdatastorage.h"
 
 
 using namespace swift;
@@ -34,12 +35,23 @@ void catch_signal( int signum ) {
         end_loop = true;
 }
 
+int readPositiveIntArg( ) {
+    char* ret;
+    errno = 0;
+    int val = strtol( optarg, &ret, 10 );
+    if( errno )
+        quit( "invalid integer: %s\n", strerror( errno ) );
+    if( *ret != 0 )
+        quit( "integer contains invalid characters: %c\n", (int)(*ret) );
+    if( ret <= 0 )
+        quit( "expected integer larger than 0\n" );
+    return val;
+}
 
 int main (int argc, char** argv) {
     // nodht TODO
     // old: daemon, debug, progress, http
     //
-    // TODO: Adjust HashTree to use separate and external data and hash stores
     // TODO: Add option to seed/leech fake data of given size, with given multiplier  -> 2TB with multiplier can use 250M data times 8K using a bitmap of 250M to keep track of which parts are received
     
     // The long options that are allowed. See below (or run with -?) for the complete usage.
@@ -55,6 +67,9 @@ int main (int argc, char** argv) {
         { "listen",     required_argument,  0, 'l' },
         { "tracker",    required_argument,  0, 't' },
         { "maxtime",    required_argument,  0, 'm' },
+        { "multiply",   required_argument,  0, '*' },
+        { "many",       required_argument,  0, '#' },
+        { "offset",     required_argument,  0, 'o' },
 
         {0, 0, 0, 0}
     };
@@ -71,6 +86,10 @@ int main (int argc, char** argv) {
     int mode = 0;
     // Time to wait (0 for infinite)
     int wait_time = 0;
+    // Offset for each next seed
+    int offset = 1;
+    // Number of seeds to start
+    int seedcount = 1;
     
     // Initialize the library
     LibraryInit();
@@ -111,14 +130,15 @@ int main (int argc, char** argv) {
                 mode = 1;
                 break;
             case 'm' :
-                errno = 0;
-                wait_time = strtol( optarg, &ret, 10 );
-                if( errno )
-                    quit( "invalid integer: %s\n", strerror( errno ) );
-                if( *ret != 0 )
-                    quit( "integer contains invalid characters: %c\n", (int)(*ret) );
-                if( wait_time <= 0 )
-                    quit( "wait time must be larger than 0\n" );
+                wait_time = readPositiveIntArg();
+                break;
+            case '*' : // --multiply
+                quit( "--multiply not implemented yet\n" );
+            case '#' : // --many
+                seedcount = readPositiveIntArg();
+                break;
+            case 'o' : // --offset
+                offset = readPositiveIntArg();
                 break;
             case '?' :
                 printf( "libswift command line test program\n" );
@@ -134,9 +154,14 @@ int main (int argc, char** argv) {
                 printf( "-l, --listen         [(ip|hostname):]port on which to listen when seeding (defaults to random port)\n" );
                 printf( "-t, --tracker        [(ip|hostname):]port where to find a tracker (defaults to none)\n" );
                 printf( "-m, --maxtime        Time in seconds to remain active, ie. maximum time to leech or seed (positive integer, defaults to infinite)\n" );
+                printf( "--multiply           Fake seeding more data by virtually multiplying the file a given number of times (positive integer, defaults to 1)\n" );
+                printf( "--many               Instead of seeding 1 file, seed the given file a given number of times, each next seed starting at +offset from the previous (positive integer, defaults to 1)\n" );
+                printf( "--offset             The offset for each next seed (positive integer, defaults to 1)\n" );
                 return 0;
         }
     }
+
+    Channel::debug_file = stdout;
 
     // Check mode
     if( !mode ) {
@@ -181,18 +206,35 @@ int main (int argc, char** argv) {
     if( root_hash != Sha1Hash::ZERO && !filename )
         filename = strdup( root_hash.hex().c_str() );
 
-    // Open file
-    int file = -1;
-    if( filename ) {
-        file = Open( filename, root_hash );
-        if( file <= 0 )
-            quit( "cannot open file %s\n", filename );
-        Sha1Hash file_hash = RootMerkleHash( file );
-        if( root_hash != Sha1Hash::ZERO && !( file_hash == root_hash ) )
+    // Open file (sets up seed or leech)
+    FileTransfer* files[seedcount];
+    bzero( files, seedcount * sizeof(FileTransfer*) );
+    int i;
+    for( i = 0; i < seedcount; i++ ) {
+        // Essentially this is just swift::Open, but allowing different storages
+        if( mode == 2 && i > 0 )
+            files[i] = new FileTransfer( new FileOffsetDataStorage( filename, offset*i ), root_hash );
+        else
+            files[i] = new FileTransfer( filename, root_hash );
+        if( !files[i] || !files[i]->file().data_storage() ) {
+            for( i = 0; i < seedcount; i++ ) {
+                if( files[i] )
+                    Close( files[i] );
+            }
+            quit( "cannot open file %s (seed %i)\n", filename, i );
+        }
+        if( Channel::Tracker() != Address() )
+            new Channel(files[i]);
+        Sha1Hash file_hash = RootMerkleHash( files[i] );
+        if( !i && root_hash != Sha1Hash::ZERO && !( file_hash == root_hash ) ) { // Only check for first seed
+            Close( files[0] );
             quit( "seeding file with root hash %s, but hash %s was specified: mismatch\n", file_hash.hex().c_str(), root_hash.hex().c_str() );
-        printf( "Root hash: %s\n", file_hash.hex().c_str() );
-        root_hash = file_hash;
+        }
+        if( mode == 2 )
+            printf( "Root hash of seed %i: %s\n", i, file_hash.hex().c_str() );
+        root_hash = Sha1Hash::ZERO;
     }
+    // From here on root_hash is no longer valid
 
     // Register our signal handler to catch SIGINT
     static struct sigaction signal_action;
@@ -208,7 +250,7 @@ int main (int argc, char** argv) {
     // Working loop
     if( mode == 1 ) {
         // Leeching
-        while( ( file >= 0 && !IsComplete( file ) ) && ( !wait_time || end_time > NOW ) && !end_loop )
+        while( ( files[0] >= 0 && !IsComplete( files[0] ) ) && ( !wait_time || end_time > NOW ) && !end_loop )
             swift::Loop( TINT_SEC );
     }
     else if( mode == 2 ) {
@@ -218,8 +260,10 @@ int main (int argc, char** argv) {
     }
    
     // Cleanup
-    if( file != -1 )
-        Close( file );
+    for( i = 0; i < seedcount; i++ ) {
+        if( files[i] )
+            Close( files[i] );
+    }
     if( Channel::debug_file )
         fclose( Channel::debug_file );
     
