@@ -10,6 +10,7 @@ namespace swift {
     class FileDataStorage : public DataStorage {
     private:
         int fd_;
+        char* filename_;
 
     public:
         FileDataStorage( const char* filename );
@@ -23,6 +24,7 @@ namespace swift {
         virtual size_t size();
         virtual bool setSize( size_t len );
         virtual bool valid();
+        const char* filename() { return filename_; }
     };
 
 }

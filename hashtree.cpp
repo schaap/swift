@@ -17,6 +17,7 @@
 #include "compat.h"
 #include "ext/filehashstorage.h"
 #include "ext/filedatastorage.h"
+#include "ext/memoryhashstorage.h"
 
 #ifdef _WIN32
 #define OPENFLAGS         O_RDWR|O_CREAT|_O_BINARY
@@ -114,14 +115,81 @@ data_storage_(NULL)
         return;
     if( !hash_storage ) {
         char hfn[1024] = "";    // Construct a filename for the hash storage and use that
-        strcat(hfn, filename);
+        strcat(hfn, filename);  // FIXME: Possible buffer overflow
         strcat(hfn, ".mhash");
         hash_storage_ = new FileHashStorage(hfn);
-        if( !hash_storage_->valid() )
+        if( !hash_storage_->valid() ) {
+            delete hash_storage_;
+            delete data_storage_;
+            data_storage_ = NULL;
+            hash_storage_ = NULL;
             return;
+        }
     }
     else {
         if( !hash_storage->valid() ) {
+            delete data_storage_;
+            data_storage_ = NULL;
+            delete hash_storage;
+            print_error( "Invalid hash storage" ); // FIXME: Won't work
+            return;
+        }
+        hash_storage_ = hash_storage;
+    }
+    if (root_hash_==Sha1Hash::ZERO) { // fresh submit, hash it
+        assert(data_storage_->size());
+        Submit();
+    } else {
+        RecoverProgress();
+    } // else  LoadComplete()
+}
+
+HashTree::HashTree (DataStorage* data_storage, const Sha1Hash& root_hash, HashStorage* hash_storage) :
+root_hash_(root_hash), data_recheck_(true),
+peak_count_(0), size_(0), sizek_(0),
+complete_(0), completek_(0), hash_storage_(NULL),
+data_storage_(NULL)
+{
+    if( !data_storage || !data_storage->valid() ) {
+        if( data_storage )
+            delete data_storage;
+        else
+            print_error( "NULL data storage?" ); // FIXME: Won't work
+        if( hash_storage )
+            delete hash_storage;
+        return;
+    }
+    data_storage_ = data_storage;
+    if( !hash_storage ) {
+        FileDataStorage* fds = dynamic_cast<FileDataStorage*>(data_storage_);
+        if( fds ) { // File data storage: use the file name for a FileHashStorage
+            char hfn[1024] = "";    // Construct a filename for the hash storage and use that
+            strcat(hfn, fds->filename());  // FIXME: Possible buffer overflow
+            strcat(hfn, ".mhash");
+            hash_storage_ = new FileHashStorage(hfn);
+        }
+        else { // No file data storage, try a FileHashStorage with the root_hash
+            if( root_hash == Sha1Hash::ZERO )
+                hash_storage_ = new MemoryHashStorage();
+            else {
+                char hfn[1024] = "";
+                strcat(hfn, root_hash.hex().c_str());
+                strcat(hfn, ".mhash");
+                hash_storage_ = new FileHashStorage(hfn);
+            }
+        }
+        if( !hash_storage_->valid() ) {
+            delete hash_storage_;
+            delete data_storage_;
+            data_storage_ = NULL;
+            hash_storage_ = NULL;
+            return;
+        }
+    }
+    else {
+        if( !hash_storage->valid() ) {
+            delete data_storage_;
+            data_storage_ = NULL;
             delete hash_storage;
             print_error( "Invalid hash storage" ); // FIXME: Won't work
             return;

@@ -19,11 +19,14 @@ FileDataStorage::FileDataStorage( const char* filename ) : fd_(0) {
         print_error( "cannot open the file" );
         return;
     }
+    filename_ = strdup( filename );
 }
 
 FileDataStorage::~FileDataStorage( ) {
     if( fd_ )
         close( fd_ );
+    if( filename_ )
+        free( filename_ );
 }
 
 size_t FileDataStorage::read( char* buf, size_t len ) {
