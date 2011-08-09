@@ -29,6 +29,8 @@ TEST(Connection,CwndTest) {
     int sock1 = swift::Listen(7001);
 	ASSERT_TRUE(sock1>=0);
 
+    // NOTE: This tests depends on the order in which FileTransfer objects end up in the array FileTransfer::files, since the correct FileTransfer instance for sending the file (upon handshake) is looked up from the root hash and the first match in the array is used (i.e. if the copy appears earlier in the array, the copy will be used for sending as well, with obvious problems)
+
 	FileTransfer* fileobj = swift::Open("doc/sofi.jpg");
     //FileTransfer::instance++;
 

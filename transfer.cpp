@@ -26,8 +26,10 @@ FileTransfer::FileTransfer (const char* filename, const Sha1Hash& _root_hash) :
 {
     // NOTE: This should probably be guarded against multithreaded access faults (very easy to break this array)
     for(int i=0; i<files.size();i++) {
-        if(!files[i])
+        if(!files[i]) {
             files_index_=i;
+            break;
+        }
     }
     if(files_index_==-1) {
         files_index_=files.size()+1;

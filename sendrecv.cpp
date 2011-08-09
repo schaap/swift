@@ -499,15 +499,15 @@ void    Channel::RecvDatagram (SOCKET socket) {
         if (pos!=bin64_t::ALL)
             return_log ("%s #0 that is not the root hash %s\n",tintstr(),addr.str());
         hash = data.PullHash();
-        FileTransfer* file = FileTransfer::Find(hash);
-        if (!file)
+        FileTransfer* ft = FileTransfer::Find(hash);
+        if (!ft)
             return_log ("%s #0 hash %s unknown, no such file %s\n",tintstr(),hash.hex().c_str(),addr.str());
         dprintf("%s #0 -hash ALL %s\n",tintstr(),hash.hex().c_str());
-        for(binqueue::iterator i=file->hs_in_.begin(); i!=file->hs_in_.end(); i++)
+        for(binqueue::iterator i=ft->hs_in_.begin(); i!=ft->hs_in_.end(); i++)
             if (channels[*i] && channels[*i]->peer_==data.address() &&
                 channels[*i]->last_recv_time_>NOW-TINT_SEC*2)
                 return_log("%s #0 have a channel already to %s\n",tintstr(),addr.str());
-        channel = new Channel(file, socket, data.address());
+        channel = new Channel(ft, socket, data.address());
     } else {
         mych = DecodeID(mych);
         if (mych>=channels.size())
