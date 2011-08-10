@@ -1,5 +1,5 @@
 CPPFLAGS=-I.. -DDEBUG -g
-LDFLAGS=-I..
+LDFLAGS=-I.. -lpthread
 
 all: swift
 
