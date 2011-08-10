@@ -135,7 +135,7 @@ void* statisticsThread( void* statargs ) {
     time_t now;
     struct tm* now_tm;
     time( &now );
-    now_tm = gm_time( &now );
+    now_tm = gmtime( &now );
     strftime( buf2, 1024, "%F %T", now_tm );
 
     // Take first measures

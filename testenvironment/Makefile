@@ -1,7 +1,13 @@
 CPPFLAGS=-I.. -DDEBUG -g
 LDFLAGS=-I.. -lpthread
 
-all: swift
+all: swift statconverter
+
+statconverter: statconverter.o
+	$(CXX) $(CPPFLAGS) $(LDFLAGS) $^ -o $@
+
+statconverter.o: statconverter.cpp
+	$(CXX) -c $(CPPFLAGS) $< -o $@
 
 swift.o: swift.cpp
 	$(CXX) -c $(CPPFLAGS) $< -o $@
@@ -20,4 +26,4 @@ swift: swift.o sha1.o compat.o sendrecv.o send_control.o hashtree.o bin64.o bins
 	$(CXX) $(CPPFLAGS) $(LDFLAGS) $^ -o $@
 
 clean:
-	rm -f *.o swift ext/*.o
+	rm -f *.o swift ext/*.o statconverter
