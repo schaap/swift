@@ -101,11 +101,11 @@ void* statisticsThread( void* statargs ) {
     uint32_t microsuser, microskernel, bytesread, byteswritten;
     useconds_t sleepytime;
     uint16_t sleepytime16;
-    char* microsuser_p = (char*)&microsuser;
-    char* microskernel_p = (char*)&microskernel;
-    char* bytesread_p = (char*)&bytesread;
-    char* byteswritten_p = (char*)&byteswritten;
-    char* sleepytime16_p = (char*)&sleepytime16;
+    uint8_t* microsuser_p = (uint8_t*)&microsuser;
+    uint8_t* microskernel_p = (uint8_t*)&microskernel;
+    uint8_t* bytesread_p = (uint8_t*)&bytesread;
+    uint8_t* byteswritten_p = (uint8_t*)&byteswritten;
+    uint8_t* sleepytime16_p = (uint8_t*)&sleepytime16;
 
     int statfile = open( filename, O_APPEND|O_CREAT|O_WRONLY, S_IRUSR|S_IWUSR );
     if( statfile < 0 ) {
@@ -133,8 +133,10 @@ void* statisticsThread( void* statargs ) {
     }
 
     time_t now;
+    struct tm* now_tm;
     time( &now );
-    ctime_r( &now, buf2 );
+    now_tm = gm_time( &now );
+    strftime( buf2, 1024, "%F %T", now_tm );
 
     // Take first measures
     if( getrusage( RUSAGE_SELF, &ru1 ) ) {
@@ -260,7 +262,7 @@ void* statisticsThread( void* statargs ) {
         }
         gettimeofday( &tv2, NULL );
         sleepytime = 1000 - ((tv2.tv_sec - tv1.tv_sec) * 1000000 + (tv2.tv_usec - tv1.tv_usec));
-        if( sleepytime > 0 )
+        if( sleepytime && sleepytime < 2000 ) // Guard against no sleep or too much sleep (too much being a negative value :/)
             usleep( sleepytime );
     }
 
@@ -544,8 +546,10 @@ int main (int argc, char** argv) {
     // Shutdown library
     swift::Shutdown();
     
-    if( statistics )
+    if( statistics ) {
+        fprintf( stderr, "joining\n" );
         pthread_join( child, NULL );
+    }
 
     return 0;
 }
