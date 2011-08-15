@@ -329,6 +329,9 @@ namespace swift {
 
         static const Address& Tracker() { return tracker; }
 
+        static inline uint64_t totalBytesRead() { return totalBytesRead_; }
+        static inline uint64_t totalBytesSent() { return totalBytesSent_; }
+
     protected:
         /** Channel id: index in the channel array. */
         uint32_t    id_;
@@ -412,6 +415,10 @@ namespace swift {
 
         static Address  tracker;
         static std::vector<Channel*> channels;
+
+        // Statistics
+        static uint64_t totalBytesRead_;
+        static uint64_t totalBytesSent_;
 
         friend int              Listen (Address addr);
         friend void             Shutdown (int sock_des);

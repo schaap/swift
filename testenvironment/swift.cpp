@@ -53,7 +53,7 @@ int readPositiveIntArg( ) {
 }
 
 // statargs should be of type char**[] with *(statargs[0]) being the filename to write
-// statistics to and *(statargs[1]) being the name of the interface to watch.
+// statistics to.
 void* statisticsThread( void* statargs ) {
     // The statistics file is a (semi-)binary data file containing a human readable
     // date marker on the first line, the version (an integer) on the second line
@@ -87,12 +87,11 @@ void* statisticsThread( void* statargs ) {
     
     // Extract parameters
     char* filename = *(((char***)statargs)[0]);
-    char* iface = *(((char***)statargs)[1]);
     
     // Prepare all measurement tools
     struct rusage ru1;
     struct rusage ru2;
-    long rx1, rx2, tx1, tx2;
+    uint64_t rx1, rx2, tx1, tx2;
     char buf[1024];
     char buf2[1024];
     ssize_t n;
@@ -113,25 +112,6 @@ void* statisticsThread( void* statargs ) {
         exit( -1 );
     }
 
-    char rxfilename[1024] = "/sys/class/net/";
-    char txfilename[1024];
-    strncat( rxfilename + strlen(rxfilename), iface, 1023-strlen(rxfilename) );
-    strncpy( txfilename, rxfilename, 1024 );
-    strncat( rxfilename + strlen(rxfilename), "/statistics/rx_bytes", 1023-strlen(rxfilename) );
-    strncat( txfilename + strlen(txfilename), "/statistics/tx_bytes", 1023-strlen(txfilename) );
-
-    int rxfile = open( rxfilename, O_RDONLY );
-    if( rxfile < 0 ) {
-        fprintf( stderr, "%s\n", rxfilename );
-        print_error( "Could not open read statistics for interface" );
-        exit( -1 );
-    }
-    int txfile = open( txfilename, O_RDONLY );
-    if( txfile < 0 ) {
-        print_error( "Could not open write statistics for interface" );
-        exit( -1 );
-    }
-
     time_t now;
     struct tm* now_tm;
     time( &now );
@@ -143,18 +123,8 @@ void* statisticsThread( void* statargs ) {
         print_error( "getrusage failed" );
         exit( -1 );
     }
-    if( ( n = pread( rxfile, buf, 1023, 0 ) ) < 0 ) {
-        print_error( "Could not read from read statistics for interface" );
-        exit( -1 );
-    }
-    buf[n] = 0;
-    rx1 = strtol( buf, NULL, 10 );
-    if( ( n = pread( txfile, buf, 1023, 0 ) ) < 0 ) {
-        print_error( "Could not read from write statistics for interface" );
-        exit( -1 );
-    }
-    buf[n] = 0;
-    tx1 = strtol( buf, NULL, 10 );
+    rx1 = 0; // By definition (since we only start measuring when the process begins)
+    tx1 = 0;
 
     if( gettimeofday( &tv1, NULL ) < 0 ) {
         print_error( "Could not get the time of day" );
@@ -191,15 +161,11 @@ void* statisticsThread( void* statargs ) {
         ru1.ru_stime.tv_sec = ru2.ru_stime.tv_sec;
         ru1.ru_stime.tv_usec = ru2.ru_stime.tv_usec;
 
-        n = pread( rxfile, buf, 1023, 0 );
-        buf[n] = 0;
-        rx2 = strtol( buf, NULL, 10 );
+        rx2 = Channel::totalBytesRead();
         bytesread = rx2 - rx1;
         rx1 = rx2;
 
-        n = pread( txfile, buf, 1023, 0 );
-        buf[n] = 0;
-        tx2 = strtol( buf, NULL, 10 );
+        tx2 = Channel::totalBytesSent();
         byteswritten = tx2 - tx1;
         tx1 = tx2;
 
@@ -266,8 +232,8 @@ void* statisticsThread( void* statargs ) {
             usleep( sleepytime );
     }
 
-    close( rxfile );
-    close( txfile );
+/*    close( rxfile );
+    close( txfile );*/
     close( statfile );
 
     return NULL;
@@ -296,7 +262,6 @@ int main (int argc, char** argv) {
         { "many",       required_argument,  0, '#' },
         { "offset",     required_argument,  0, 'o' },
         { "stat",       required_argument,  0, '@' },
-        { "iface",      required_argument,  0, 'i' },
 
         {0, 0, 0, 0}
     };
@@ -317,12 +282,10 @@ int main (int argc, char** argv) {
     int offset = 1;
     // Number of seeds to start
     int seedcount = 1;
-    // Name of the interface to be watches
-    char* interface = 0;
     // Name of the statistics file
     char* statistics = 0;
     // Array with the addresses of the former two
-    char** statargs[] = { &statistics, &interface };
+    char** statargs[] = { &statistics };
     
     // Initialize the library
     LibraryInit();
@@ -376,9 +339,6 @@ int main (int argc, char** argv) {
             case '@' : // --stat
                 statistics = strdup( optarg );
                 break;
-            case 'i' : // --iface
-                interface = strdup( optarg );
-                break;
             case '?' :
                 printf( "libswift command line test program\n" );
                 printf( "Usage: %s action [options]\n", argv[0] );
@@ -418,10 +378,6 @@ int main (int argc, char** argv) {
         if( !filename )
             quit( "--file required when seeding\n" );
     }
-
-    // Check statistics, if applicable
-    if( statistics && !interface )
-        quit( "--iface is required when --stat is given\n" );
 
     // Bind to port
     int socket;

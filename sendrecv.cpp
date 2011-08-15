@@ -12,6 +12,9 @@
 using namespace swift;
 using namespace std;
 
+uint64_t Channel::totalBytesRead_ = 0;
+uint64_t Channel::totalBytesSent_ = 0;
+
 /*
  TODO  25 Oct 18:55
  - range: ALL
@@ -125,6 +128,7 @@ void    Channel::Send () {
     }
     dprintf("%s #%u sent %ib %s:%x\n",
             tintstr(),id_,dgram.size(),peer().str(),peer_channel_id_);
+    Channel::totalBytesSent_ += dgram.size();
     if (dgram.size()==4) {// only the channel id; bare keep-alive
         data = bin64_t::ALL;
     }
@@ -258,6 +262,7 @@ void    Channel::AddHave (Datagram& dgram) {
 
 void    Channel::Recv (Datagram& dgram) {
     dprintf("%s #%u recvd %ib\n",tintstr(),id_,dgram.size()+4);
+    Channel::totalBytesRead_ += dgram.size();
     dgrams_rcvd_++;
     if (last_send_time_ && rtt_avg_==TINT_SEC && dev_avg_==0) {
         rtt_avg_ = NOW - last_send_time_;
