@@ -37,6 +37,11 @@ int main( int argc, char** argv ) {
     char byteswritten[8];
     char sleepytime[4];
     int ret;
+    int microsuser_cuml = 0;
+    int microskernel_cuml = 0;
+    int bytesrx_cuml = 0;
+    int bytestx_cuml = 0;
+    int slicecnt = 0;
 
     do {
         n = read( input, buf, 1024 );
@@ -60,8 +65,8 @@ int main( int argc, char** argv ) {
                         continue;
                     }
                     // Read header
-                    if( !strptime( buf2, "%F %T", &header ) ) {
-                        printf( "Header \"%s\" could not be converted to a date\n", buf2 );
+                    if( (ret =sscanf( buf2, "%4u-%2u-%2u %2u:%2u:%2u", (unsigned int*)&header.tm_year, (unsigned int*)&header.tm_mon, (unsigned int*)&header.tm_mday, (unsigned int*)&header.tm_hour, (unsigned int*)&header.tm_min, (unsigned int*)&header.tm_sec ) )!= 6 ) {
+                        printf( "Header \"%s\" could not be converted to a date: %i\n", buf2, ret );
                         exit( -1 );
                     }
                     // Construct filename and open file
@@ -69,6 +74,7 @@ int main( int argc, char** argv ) {
                     output = open( buf2, O_CREAT|O_WRONLY, S_IRUSR|S_IWUSR );
                     if( output < 0 )
                         quit( buf2 );
+                    printf( "Writing log to %s (time in GMT)\n", buf2 );
                     // Continue to next state
                     state = 1;
                     version = 0;
@@ -81,7 +87,15 @@ int main( int argc, char** argv ) {
                     }
                     switch( version ) {
                         case 1 : // OK version, continue to next state
+                            printf( "- Log version 1:\n" );
+                            printf( "- timeslice# usertime usertime(cml) kerneltime kerneltime(cml) bytesrx bytesrx(cml) bytestx bytestx(cml) sleeptime\n" );
+                            printf( "- times are absolute, per timeslice and in ms; timeslice is 1000ms; cml=cumulative\n" );
                             state = 2;
+                            microsuser_cuml = 0;
+                            microskernel_cuml = 0;
+                            bytesrx_cuml = 0;
+                            bytestx_cuml = 0;
+                            slicecnt = 0;
                             break;
                         default:
                             printf( "Unknown version: %i\n", version );
@@ -98,10 +112,14 @@ int main( int argc, char** argv ) {
                         continue;
                     }
                     // Normal line? Let's see
-                    if( strlen( buf2 ) == 40 ) {
+                    if( strlen( buf2 ) == 41 ) {
                         ret = sscanf( buf2, "a%8cb%8cc%8cd%8ce%4c", microsuser, microskernel, bytesread, byteswritten, sleepytime );
                         if( ret == 5 ) {
-                            snprintf( buf2, 1024, "%i %i %i %i %i\n", (int)fromhex64(microsuser,8), (int)fromhex64(microskernel,8), (int)fromhex64(bytesread,8), (int)fromhex64(byteswritten,8), (int)fromhex64(sleepytime,4) );
+                            microsuser_cuml += (int)fromhex64(microsuser,8);
+                            microskernel_cuml += (int)fromhex64(microskernel,8);
+                            bytesrx_cuml += (int)fromhex64(bytesread,8);
+                            bytestx_cuml += (int)fromhex64(byteswritten,8);
+                            snprintf( buf2, 1024, "%i %i %i %i %i %i %i %i %i %i\n", slicecnt++, (int)fromhex64(microsuser,8), microsuser_cuml, (int)fromhex64(microskernel,8), microskernel_cuml, (int)fromhex64(bytesread,8), bytesrx_cuml, (int)fromhex64(byteswritten,8), bytestx_cuml, (int)fromhex64(sleepytime,4) );
                             if( write( output, buf2, strlen(buf2) ) != strlen(buf2) )
                                 quit( "writing output" );
                             p = 0;
@@ -109,7 +127,7 @@ int main( int argc, char** argv ) {
                         }
                     }
                     // Not a normal line. New header?
-                    if( !strptime( buf2, "%F %T", &header ) ) {
+                    if( (ret =sscanf( buf2, "%4u-%2u-%2u %2u:%2u:%2u", (unsigned int*)&header.tm_year, (unsigned int*)&header.tm_mon, (unsigned int*)&header.tm_mday, (unsigned int*)&header.tm_hour, (unsigned int*)&header.tm_min, (unsigned int*)&header.tm_sec ) )!= 6 ) {
                         printf( "Unexpected input: %s\n", buf2 );
                         exit( -1 );
                     }
@@ -119,6 +137,7 @@ int main( int argc, char** argv ) {
                     output = open( buf2, O_CREAT|O_WRONLY, S_IRUSR|S_IWUSR );
                     if( output < 0 )
                         quit( buf2 );
+                    printf( "Writing log to %s (time in GMT)\n", buf2 );
                     // Continue to next state
                     state = 1;
                     version = 0;

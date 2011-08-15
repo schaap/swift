@@ -136,7 +136,7 @@ void* statisticsThread( void* statargs ) {
     struct tm* now_tm;
     time( &now );
     now_tm = gmtime( &now );
-    strftime( buf2, 1024, "%F %T", now_tm );
+    snprintf( buf2, 1024, "%04i-%02i-%02i %02i:%02i:%02i\n", now_tm->tm_year, now_tm->tm_mon, now_tm->tm_mday, now_tm->tm_hour, now_tm->tm_min, now_tm->tm_sec );
 
     // Take first measures
     if( getrusage( RUSAGE_SELF, &ru1 ) ) {
@@ -546,10 +546,8 @@ int main (int argc, char** argv) {
     // Shutdown library
     swift::Shutdown();
     
-    if( statistics ) {
-        fprintf( stderr, "joining\n" );
+    if( statistics )
         pthread_join( child, NULL );
-    }
 
     return 0;
 }
