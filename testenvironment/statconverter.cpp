@@ -11,6 +11,8 @@
 #include <endian.h>
 #include <math.h>
 
+#include "testenvironment/compat.h"
+
 #define quit(x) { perror(x); exit(-1); }
 
 uint64_t fromhex64( char* str, int sz );
