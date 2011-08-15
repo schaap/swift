@@ -20,6 +20,7 @@
 #include <sys/resource.h>
 #include <pthread.h>
 
+#include "../compat.h"
 #include "compat.h"
 #include "swift.h"
 #include "fileoffsetdatastorage.h"
