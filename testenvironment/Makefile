@@ -1,10 +1,10 @@
 CPPFLAGS=-I.. -DDEBUG -g
-LDFLAGS=-I.. -lpthread
+LDFLAGS=-I..
 
 all: swift statconverter
 
 statconverter: statconverter.o
-	$(CXX) $(CPPFLAGS) $(LDFLAGS) $^ -o $@
+	$(CXX) $(CPPFLAGS) $(LDFLAGS) -lm $^ -o $@
 
 statconverter.o: statconverter.cpp
 	$(CXX) -c $(CPPFLAGS) $< -o $@
@@ -23,8 +23,8 @@ ext/%.o : ../ext/%.cpp
 	$(CXX) -c $(CPPFLAGS) $< -o $@
 
 swift: swift.o sha1.o compat.o sendrecv.o send_control.o hashtree.o bin64.o bins.o channel.o datagram.o transfer.o httpgw.o ext/memoryhashstorage.o ext/filehashstorage.o ext/filedatastorage.o fileoffsetdatastorage.o
-	$(CXX) $(CPPFLAGS) $(LDFLAGS) $^ -o $@
+	$(CXX) $(CPPFLAGS) $(LDFLAGS) -lpthread $^ -o $@
 
 clean:
 	rm -f *.o swift ext/*.o statconverter
-	rmdir --ignore-fail-on-non-empty ext/
+	rmdir -f --ignore-fail-on-non-empty ext/

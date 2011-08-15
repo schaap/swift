@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <endian.h>
+#include <math.h>
 
 #define quit(x) { perror(x); exit(-1); }
 
@@ -26,7 +27,7 @@ int main( int argc, char** argv ) {
     int output = -1;
     char buf[1024];
     char buf2[1024];
-    int n, i;
+    int n, i, j;
     int p = 0;
     int state = 0;
     struct tm header;
@@ -42,6 +43,17 @@ int main( int argc, char** argv ) {
     int bytesrx_cuml = 0;
     int bytestx_cuml = 0;
     int slicecnt = 0;
+    int userwindow[100];
+    int kernelwindow[100];
+    int rxwindow[100];
+    int txwindow[100];
+    int useravg;
+    int kernelavg;
+    int rxavg;
+    int txavg;
+    int windowpointer;
+    int userprev;
+    int kernelprev;
 
     do {
         n = read( input, buf, 1024 );
@@ -88,14 +100,21 @@ int main( int argc, char** argv ) {
                     switch( version ) {
                         case 1 : // OK version, continue to next state
                             printf( "- Log version 1:\n" );
-                            printf( "- timeslice# usertime usertime(cml) kerneltime kerneltime(cml) bytesrx bytesrx(cml) bytestx bytestx(cml) sleeptime\n" );
-                            printf( "- times are absolute, per timeslice and in ms; timeslice is 1000ms; cml=cumulative\n" );
+                            printf( "- timeslice# usertime usertime(cml) usertime%/sec kerneltime kerneltime(cml) kerneltime%/sec bytesrx bytesrx(cml) bytesrx/sec bytestx bytestx(cml) bytestx/sec sleeptime\n" );
+                            printf( "- times are absolute, per timeslice and in us; timeslice is 10000ms (100Hz); cml=cumulative; X/sec by trailing average\n" );
                             state = 2;
                             microsuser_cuml = 0;
                             microskernel_cuml = 0;
                             bytesrx_cuml = 0;
                             bytestx_cuml = 0;
                             slicecnt = 0;
+                            bzero( userwindow, 100*sizeof(int) );
+                            bzero( kernelwindow, 100*sizeof(int) );
+                            bzero( txwindow, 100*sizeof(int) );
+                            bzero( rxwindow, 100*sizeof(int) );
+                            windowpointer = 0;
+                            userprev = 0;
+                            kernelprev = 0;
                             break;
                         default:
                             printf( "Unknown version: %i\n", version );
@@ -115,11 +134,30 @@ int main( int argc, char** argv ) {
                     if( strlen( buf2 ) == 41 ) {
                         ret = sscanf( buf2, "a%8cb%8cc%8cd%8ce%4c", microsuser, microskernel, bytesread, byteswritten, sleepytime );
                         if( ret == 5 ) {
-                            microsuser_cuml += (int)fromhex64(microsuser,8);
-                            microskernel_cuml += (int)fromhex64(microskernel,8);
-                            bytesrx_cuml += (int)fromhex64(bytesread,8);
-                            bytestx_cuml += (int)fromhex64(byteswritten,8);
-                            snprintf( buf2, 1024, "%i %i %i %i %i %i %i %i %i %i\n", slicecnt++, (int)fromhex64(microsuser,8), microsuser_cuml, (int)fromhex64(microskernel,8), microskernel_cuml, (int)fromhex64(bytesread,8), bytesrx_cuml, (int)fromhex64(byteswritten,8), bytestx_cuml, (int)fromhex64(sleepytime,4) );
+                            userwindow[windowpointer] = (int)fromhex64(microsuser,8) - userprev;
+                            userprev = (int)fromhex64(microsuser,8);
+                            microsuser_cuml += userwindow[windowpointer];
+                            kernelwindow[windowpointer] = (int)fromhex64(microskernel,8) - kernelprev;
+                            kernelprev = (int)fromhex64(microskernel,8);
+                            microskernel_cuml += kernelwindow[windowpointer];
+                            rxwindow[windowpointer] = (int)fromhex64(bytesread,8);
+                            bytesrx_cuml += rxwindow[windowpointer];
+                            txwindow[windowpointer] = (int)fromhex64(byteswritten,8);
+                            bytestx_cuml += txwindow[windowpointer];
+                            rxavg = 0;
+                            txavg = 0;
+                            useravg = 0;
+                            kernelavg = 0;
+                            for( j = 0; j < 100; j++ ) {
+                                rxavg += rxwindow[j];
+                                txavg += txwindow[j];
+                                useravg += userwindow[j];
+                                kernelavg += kernelwindow[j];
+                            }
+                            useravg = ceilf( (float)useravg / 10000.0 ); // (useravg / 1000000) * 100%
+                            kernelavg = ceilf( (float)kernelavg / 10000.0);
+                            snprintf( buf2, 1024, "%i %i %i %i %i %i %i %i %i %i %i %i %i %i\n", slicecnt++, userwindow[windowpointer], microsuser_cuml, useravg, kernelwindow[windowpointer], microskernel_cuml, kernelavg, rxwindow[windowpointer], bytesrx_cuml, rxavg, txwindow[windowpointer], bytestx_cuml, txavg, (int)fromhex64(sleepytime,4) );
+                            windowpointer = (windowpointer + 1) % 100;
                             if( write( output, buf2, strlen(buf2) ) != strlen(buf2) )
                                 quit( "writing output" );
                             p = 0;

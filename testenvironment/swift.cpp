@@ -72,11 +72,11 @@ void* statisticsThread( void* statargs ) {
     // ((X & 15) | 64).
     //
     // Version history (only append, DO NOT delete or modify old versions):
-    // - 1:
+    // - 1 (@100Hz):    (was 1000Hz, but that uses about 4 to 5 percent CPU)
     // -- 1 byte 'a'
-    // -- 32 bits microseconds user CPU time (hex|64 encoded)
+    // -- 32 bits microseconds user CPU time, cumulative (hex|64 encoded)
     // -- 1 byte 'b'
-    // -- 32 bits microseconds kernel CPU time (hex|64 encoded)
+    // -- 32 bits microseconds kernel CPU time, cumulative (hex|64 encoded)
     // -- 1 byte 'c'
     // -- 32 bits number of bytes read on watched interface (hex|64 encoded)
     // -- 1 byte 'd'
@@ -116,10 +116,10 @@ void* statisticsThread( void* statargs ) {
     struct tm* now_tm;
     time( &now );
     now_tm = gmtime( &now );
-    snprintf( buf2, 1024, "%04i-%02i-%02i %02i:%02i:%02i\n", now_tm->tm_year, now_tm->tm_mon, now_tm->tm_mday, now_tm->tm_hour, now_tm->tm_min, now_tm->tm_sec );
+    snprintf( buf2, 1024, "%04i-%02i-%02i %02i:%02i:%02i\n", 1900+now_tm->tm_year, 1+now_tm->tm_mon, now_tm->tm_mday, now_tm->tm_hour, now_tm->tm_min, now_tm->tm_sec );
 
     // Take first measures
-    if( getrusage( RUSAGE_SELF, &ru1 ) ) {
+    if( getrusage( RUSAGE_SELF, &ru1 ) ) { // Just to check that it works
         print_error( "getrusage failed" );
         exit( -1 );
     }
@@ -154,12 +154,14 @@ void* statisticsThread( void* statargs ) {
     while( !end_loop ) {
         // Get measurements
         getrusage( RUSAGE_SELF, &ru2 );
-        microsuser = (uint32_t)( ( ru2.ru_utime.tv_sec - ru1.ru_utime.tv_sec ) * 1000000 + ( ru2.ru_utime.tv_usec - ru1.ru_utime.tv_usec ) );
+        microsuser = (uint32_t)( ru2.ru_utime.tv_sec * 1000000 + ru2.ru_utime.tv_usec );
+        microskernel = (uint32_t)( ru2.ru_stime.tv_sec * 1000000 + ru2.ru_stime.tv_usec );
+/*        microsuser = (uint32_t)( ( ru2.ru_utime.tv_sec - ru1.ru_utime.tv_sec ) * 1000000 + ( ru2.ru_utime.tv_usec - ru1.ru_utime.tv_usec ) );
         microskernel = (uint32_t)( ( ru2.ru_stime.tv_sec - ru1.ru_stime.tv_sec ) * 1000000 + ( ru2.ru_stime.tv_usec - ru1.ru_stime.tv_usec ) );
         ru1.ru_utime.tv_sec = ru2.ru_utime.tv_sec;
         ru1.ru_utime.tv_usec = ru2.ru_utime.tv_usec;
         ru1.ru_stime.tv_sec = ru2.ru_stime.tv_sec;
-        ru1.ru_stime.tv_usec = ru2.ru_stime.tv_usec;
+        ru1.ru_stime.tv_usec = ru2.ru_stime.tv_usec;*/
 
         rx2 = Channel::totalBytesRead();
         bytesread = rx2 - rx1;
@@ -220,20 +222,18 @@ void* statisticsThread( void* statargs ) {
         // Write line of statistics
         write( statfile, buf2, 42 );
         
-        // Sleep until next timeslot (1000 Hz)
-        tv1.tv_usec += 1000;
+        // Sleep until next timeslot (100 Hz)
+        tv1.tv_usec += 10000;
         if( tv1.tv_usec > 1000000 ) {
             tv1.tv_usec -= 1000000;
             tv1.tv_sec++;
         }
         gettimeofday( &tv2, NULL );
-        sleepytime = 1000 - ((tv2.tv_sec - tv1.tv_sec) * 1000000 + (tv2.tv_usec - tv1.tv_usec));
-        if( sleepytime && sleepytime < 2000 ) // Guard against no sleep or too much sleep (too much being a negative value :/)
+        sleepytime = 10000 - ((tv2.tv_sec - tv1.tv_sec) * 1000000 + (tv2.tv_usec - tv1.tv_usec));
+        if( sleepytime && sleepytime < 20000 ) // Guard against no sleep or too much sleep (too much being a negative value :/)
             usleep( sleepytime );
     }
 
-/*    close( rxfile );
-    close( txfile );*/
     close( statfile );
 
     return NULL;
@@ -262,6 +262,7 @@ int main (int argc, char** argv) {
         { "many",       required_argument,  0, '#' },
         { "offset",     required_argument,  0, 'o' },
         { "stat",       required_argument,  0, '@' },
+        { "debug",      no_argument,        0, 'd' },
 
         {0, 0, 0, 0}
     };
@@ -287,13 +288,15 @@ int main (int argc, char** argv) {
     // Array with the addresses of the former two
     char** statargs[] = { &statistics };
     
+    bool debug = false;
+    
     // Initialize the library
     LibraryInit();
     
     // Parse options
     int c;
     char* ret;
-    while( -1 != ( c = getopt_long( argc, argv, ":h:f:l:t:m:sg", long_options, 0 ) ) ) {
+    while( -1 != ( c = getopt_long( argc, argv, ":h:f:l:t:m:sgd", long_options, 0 ) ) ) {
         switch(c) {
             case 'h' :
                 if( strlen( optarg ) != 40 )
@@ -339,6 +342,9 @@ int main (int argc, char** argv) {
             case '@' : // --stat
                 statistics = strdup( optarg );
                 break;
+            case 'd' :
+                debug = true;
+                break;
             case '?' :
                 printf( "libswift command line test program\n" );
                 printf( "Usage: %s action [options]\n", argv[0] );
@@ -357,12 +363,13 @@ int main (int argc, char** argv) {
                 printf( "--many               Instead of seeding 1 file, seed the given file a given number of times, each next seed starting at +offset from the previous (positive integer, defaults to 1)\n" );
                 printf( "--offset             The offset for each next seed (positive integer, defaults to 1)\n" );
                 printf( "--stat               Write statistics to the specified file (filename, defaults to no statistics)\n" );
-                printf( "--iface              Interface to be watched for network traffic for the statistics (filename, required when --stat is present)\n" );
+                printf( "-d, --debug          Output debug info to standard out (defaults to no)\n" );
                 return 0;
         }
     }
 
-    Channel::debug_file = stdout;
+    if( debug )
+        Channel::debug_file = stdout;
 
     // Check mode
     if( !mode ) {
@@ -407,36 +414,6 @@ int main (int argc, char** argv) {
     if( root_hash != Sha1Hash::ZERO && !filename )
         filename = strdup( root_hash.hex().c_str() );
 
-    // Open file (sets up seed or leech)
-    FileTransfer* files[seedcount];
-    bzero( files, seedcount * sizeof(FileTransfer*) );
-    int i;
-    for( i = 0; i < seedcount; i++ ) {
-        // Essentially this is just swift::Open, but allowing different storages
-        if( mode == 2 && i > 0 )
-            files[i] = new FileTransfer( new FileOffsetDataStorage( filename, offset*i ), root_hash );
-        else
-            files[i] = new FileTransfer( filename, root_hash );
-        if( !files[i] || !files[i]->file().data_storage() ) {
-            for( i = 0; i < seedcount; i++ ) {
-                if( files[i] )
-                    Close( files[i] );
-            }
-            quit( "cannot open file %s (seed %i)\n", filename, i );
-        }
-        if( Channel::Tracker() != Address() )
-            new Channel(files[i]);
-        Sha1Hash file_hash = RootMerkleHash( files[i] );
-        if( !i && root_hash != Sha1Hash::ZERO && !( file_hash == root_hash ) ) { // Only check for first seed
-            Close( files[0] );
-            quit( "seeding file with root hash %s, but hash %s was specified: mismatch\n", file_hash.hex().c_str(), root_hash.hex().c_str() );
-        }
-        if( mode == 2 )
-            printf( "Root hash of seed %i: %s\n", i, file_hash.hex().c_str() );
-        root_hash = Sha1Hash::ZERO;
-    }
-    // From here on root_hash is no longer valid
-
     // Register our signal handler to catch SIGINT
     static struct sigaction signal_action;
     bzero( &signal_action, sizeof( struct sigaction ) );
@@ -475,6 +452,36 @@ int main (int argc, char** argv) {
         pthread_attr_destroy( &attr );
     }
 
+    // Open file (sets up seed or leech)
+    FileTransfer* files[seedcount];
+    bzero( files, seedcount * sizeof(FileTransfer*) );
+    int i;
+    for( i = 0; i < seedcount; i++ ) {
+        // Essentially this is just swift::Open, but allowing different storages
+        if( mode == 2 && i > 0 )
+            files[i] = new FileTransfer( new FileOffsetDataStorage( filename, offset*i ), root_hash );
+        else
+            files[i] = new FileTransfer( filename, root_hash );
+        if( !files[i] || !files[i]->file().data_storage() ) {
+            for( i = 0; i < seedcount; i++ ) {
+                if( files[i] )
+                    Close( files[i] );
+            }
+            quit( "cannot open file %s (seed %i)\n", filename, i );
+        }
+        if( Channel::Tracker() != Address() )
+            new Channel(files[i]);
+        Sha1Hash file_hash = RootMerkleHash( files[i] );
+        if( !i && root_hash != Sha1Hash::ZERO && !( file_hash == root_hash ) ) { // Only check for first seed
+            Close( files[0] );
+            quit( "seeding file with root hash %s, but hash %s was specified: mismatch\n", file_hash.hex().c_str(), root_hash.hex().c_str() );
+        }
+        if( mode == 2 )
+            printf( "Root hash of seed %i: %s\n", i, file_hash.hex().c_str() );
+        root_hash = Sha1Hash::ZERO;
+    }
+    // From here on root_hash is no longer valid
+
     // Time at start
     tint end_time = NOW + (wait_time * TINT_SEC);
 
@@ -496,7 +503,7 @@ int main (int argc, char** argv) {
         if( files[i] )
             Close( files[i] );
     }
-    if( Channel::debug_file )
+    if( Channel::debug_file && Channel::debug_file != stdout )
         fclose( Channel::debug_file );
     
     // Shutdown library
