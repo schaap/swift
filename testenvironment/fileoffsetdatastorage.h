@@ -4,7 +4,6 @@
 #include "../bin64.h"
 #include "../compat.h"
 #include "../storage.h"
-#include "../ext/filedatastorage.h"
 
 namespace swift {
 
