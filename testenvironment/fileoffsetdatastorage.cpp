@@ -12,7 +12,7 @@ using namespace swift;
 
 #define POS2OFFSET(pos)     (pos.base_offset()<<10)
 
-FileOffsetDataStorage::FileOffsetDataStorage( const char* filename, size_t offset, unsigned int repeat ) : offset_(offset), size_(0), cur_(0), fd_(0), filename_(0), repeat_(repeat) {
+FileOffsetDataStorage::FileOffsetDataStorage( const char* filename, size_t offset, unsigned int repeat ) : offset_(offset), size_(0), fullsize_(0), cur_(0), fd_(0), filename_(0), repeat_(repeat) {
     fd_ = open( filename , OPENFLAGS, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
     if( fd_ < 0 ) {
         fd_ = 0;
@@ -23,6 +23,7 @@ FileOffsetDataStorage::FileOffsetDataStorage( const char* filename, size_t offse
         repeat_ = 1;
     filename_ = strdup( filename );
     size_ = file_size( fd_ );
+    fullsize_ = repeat_ * size_;
 }
 
 FileOffsetDataStorage::~FileOffsetDataStorage( ) {
@@ -41,26 +42,40 @@ size_t FileOffsetDataStorage::read( char* buf, size_t len ) {
 }
 
 #define offsetOperation( op ) \
-    if( pos + offset_ <= size_ ) { \
-        if( pos + offset_ + len < size_ ) \
-            return op( fd_, buf, len, pos + offset_ ); \
-        else { \
-            int sublen = size_ - ( pos + offset_); \
-            int ret = op( fd_, buf, sublen, pos + offset_ ); \
-            if( ret < sublen ) \
-                return ret; \
-            int ret2 = op( fd_, buf + sublen, std::min(len - sublen, offset_), 0 ); \
-            if( ret2 < 0 ) \
-                return ret2; \
-            return ret + ret2; \
-        } \
-    } \
-    else { \
-        if( pos + len < size_ ) \
-            return op( fd_, buf, len, pos + offset_ - size_ ); \
+    int opos = (pos + offset_) % size_; \
+    if( opos + len < size_ ) { \
+        /* opos<size_ by definition, opos+len<size_ by test: no need to cut the operation in two halves */ \
+        if( pos + len < fullsize_ ) \
+            return op( fd_, buf, len, opos ); \
         else \
-            return op( fd_, buf, size_ - pos, pos + offset_ - size_ ); \
-    }
+            return op( fd_, buf, fullsize_ - pos, opos ); \
+    } \
+    /* opos<size_ by definition, but opos+len>=size_ by test: we need to cut the operation in two halves */ \
+    int sublen = size_ - opos; \
+    int ret = op( fd_, buf, sublen, opos ); \
+    if( ret < sublen ) \
+        return ret; \
+    size_t morelen; \
+    if( pos + len <= fullsize_ ) \
+        morelen = len - sublen; \
+    else \
+        morelen = fullsize_ - ( pos + sublen ); \
+    size_t bufoff = sublen; \
+    while( morelen > size_ ) { \
+        /* note that it could be more efficient to just copy after the first full read, but for more correct IO characteristics every full size_ is read */ \
+        ret = op( fd_, buf + bufoff, size_, 0 ); \
+        if( ret < size_ ) { \
+            if( ret < 0 ) \
+                return ret; \
+            return bufoff + ret; \
+        } \
+        bufoff += size_; \
+        morelen -= size_; \
+    } \
+    ret = op( fd_, buf + bufoff, morelen, 0 ); \
+    if( ret < 0 ) \
+        return ret; \
+    return bufoff + ret;
 
 size_t FileOffsetDataStorage::read( off_t pos, char* buf, size_t len ) {
     offsetOperation( pread )
@@ -87,13 +102,18 @@ size_t FileOffsetDataStorage::write( bin64_t pos, const char* buf, size_t len ) 
 }
 
 size_t FileOffsetDataStorage::size() {
-    return size_;
+    return fullsize_;
 }
 
 bool FileOffsetDataStorage::setSize( size_t len ) {
-    bool ret = file_resize( fd_, len );
-    if( ret )
-        size_ = len;
+    size_t flen = len / repeat_;
+    if( flen * repeat_ < len )
+        flen++;
+    bool ret = file_resize( fd_, flen );
+    if( ret ) {
+        size_ = flen;
+        fullsize_ = len;
+    }
     return ret;
 }
 

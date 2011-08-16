@@ -12,6 +12,7 @@ namespace swift {
     protected:
         size_t offset_;
         size_t size_;
+        size_t fullsize_;
         size_t cur_;
         char* filename_;
         size_t fd_;
