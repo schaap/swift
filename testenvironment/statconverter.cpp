@@ -102,7 +102,7 @@ int main( int argc, char** argv ) {
                     switch( version ) {
                         case 1 : // OK version, continue to next state
                             printf( "- Log version 1:\n" );
-                            printf( "- timeslice# usertime usertime(cml) usertime%/sec kerneltime kerneltime(cml) kerneltime%/sec bytesrx bytesrx(cml) bytesrx/sec bytestx bytestx(cml) bytestx/sec sleeptime\n" );
+                            printf( "- timeslice# usertime usertime(cml) usertime%%/sec kerneltime kerneltime(cml) kerneltime%%/sec bytesrx bytesrx(cml) bytesrx/sec bytestx bytestx(cml) bytestx/sec sleeptime\n" );
                             printf( "- times are absolute, per timeslice and in us; timeslice is 10000ms (100Hz); cml=cumulative; X/sec by trailing average\n" );
                             state = 2;
                             microsuser_cuml = 0;

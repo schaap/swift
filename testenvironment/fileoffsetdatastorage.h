@@ -15,9 +15,10 @@ namespace swift {
         size_t cur_;
         char* filename_;
         size_t fd_;
+        unsigned int repeat_;
 
     public:
-        FileOffsetDataStorage( const char* filename, size_t offset );
+        FileOffsetDataStorage( const char* filename, size_t offset, unsigned int repeat = 1 );
         ~FileOffsetDataStorage();
         virtual size_t read( off_t pos, char* buf, size_t len );
         virtual size_t write( off_t pos, const char* buf, size_t len );
