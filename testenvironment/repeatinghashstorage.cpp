@@ -10,14 +10,19 @@ using namespace swift;
 #endif
 
 
-// TODO: Full review
+// Known and important limitation: the repeated pattern of hashes has always a length (in number of hashes) of a power of 2
+// The same goes for the number fo repeats, with a minimum of 2. I.e. the length of a repeating hash storage is always a power of 2.
 
+// Note that depending on the usage pattern the structure adepts. This means that the repetition pattern can change over time.
+// Depending on the usage this can mean that data is lost while the structure is still adepting to its final size. (i.e. sequentially filling with hashes)
+// For this reason it is best to always try and specify the size of the structure BEFORE writing any data to it.
 
-RepeatingHashStorage::RepeatingHashStorage( const char* filename, unsigned int repeat ) : repeat_(repeat), real_(filename), bmp_(-1), extra_(), internalrepeat_(1), lowlayercount_(0), highlayercount_(1), prevlowlayercount_(0), reallength_(0), bmp_itemsize_(0) {
+RepeatingHashStorage::RepeatingHashStorage( const char* filename, unsigned int repeat ) : repeat_(repeat), real_(filename), bmp_(-1), extra_(), lowlayercount_(1), highlayercount_(1), bmp_itemsize_(0), mask_(0) {
+    int i;
     if( !repeat )
-        repeat_ = 1;
+        repeat_ = 2;
 
-    for( int i = 0; i < 64; i++ )
+    for( i = 0; i < 64; i++ )
         layerlength_[i] = 0;
 
     if( !real_.valid() )
@@ -36,16 +41,27 @@ RepeatingHashStorage::RepeatingHashStorage( const char* filename, unsigned int r
         return;
     }
 
-    // internalrepeat_: smallest power of 2 greater than or equal to repeat_
-    while( internalrepeat_ < repeat_ ) {
-        internalrepeat_ <<= 1;
+    // internalrepeat: smallest power of 2 greater than or equal to repeat_
+    int internalrepeat = 2;
+    while( internalrepeat < repeat_ ) {
+        internalrepeat <<= 1;
         highlayercount_++;
     }
+    repeat_ = internalrepeat;
+
+    int layerlength = 1;
+    for( i = highlayercount_; i >= 0; i-- ) {
+        layerlength_[i] = layerlength;
+        layerlength <<= 1;
+    }
+
     bmp_itemsize_ = highlayercount_ / 8;
     if( bmp_itemsize_ * 8  < highlayercount_ )
         bmp_itemsize_++;
 
-    extra_.setHashCount( internalrepeat_ );
+    extra_.setHashCount( repeat_ );
+
+    real_.setHashCount( 1 );
 
     if( !extra_.valid() ) {
         close( bmp_ );
@@ -62,47 +78,57 @@ bool RepeatingHashStorage::valid() {
     return real_.valid() && extra_.valid() && bmp_ >= 0;
 }
 
+// Downsizing is very explicitly not supported
+// Arbitrary counts are upsized to the nearest power of 2
 bool RepeatingHashStorage::setHashCount( int count ) {
-    // assertion: count >= repeat_
-    int reallength_ = count / repeat_;
-    if( repeat_ * reallength_ < count )
-        reallength_++;
+    int prevlowlayercount = lowlayercount_;
+    int reallength = 1 << (lowlayercount_ - 1);
+    int lowlayercount = lowlayercount_;
+    while( reallength * repeat_ < count ) {
+        reallength <<= 1;
+        lowlayercount++;
+    }
 
-    if( file_resize( bmp_, count * bmp_itemsize_ * 2 ) ) {
+    if( lowlayercount == prevlowlayercount )
+        return true;
+
+    if( file_resize( bmp_, reallength * bmp_itemsize_ * 2 ) ) {
         print_error( "Could not resize bitmap file" );
         return false;
     }
 
-    int internalcount = 1;
-    int layercount = 1;
-    layerlength_[0] = count;
-    while( internalcount < count ) {
-        internalcount <<= 1;
-        layercount++;
-        layerlength_[layercount] = count / internalcount;
-        if( layerlength_[layercount] * internalcount < count )
-            layerlength_[layercount]++;
+    if( !real_.setHashCount( reallength ) )
+        return false;
+
+    lowlayercount_ = lowlayercount;
+    mask_ = reallength - 1;
+
+    int layerlength = 1;
+    for( int i = highlayercount_; i >= 0; i-- ) {
+        layerlength_[i] = layerlength;
+        layerlength <<= 1;
     }
 
-    lowlayercount_ = layercount - highlayercount_;
-
-    if( prevlowlayercount_ < lowlayercount_ ) {
-        int layer, item;
-        // More lower layers, so move higher layers into lower layers
-        int layerdiff = lowlayercount_ - prevlowlayercount_;
-        int movelayers = layerdiff;
-        for( layer = 0; layer < movelayers; layer++ ) {
-            int itemcount = 1 << (movelayers - layer); // Number of items in the layer that could have been added before
-            for( item = 0; item < itemcount; item++ ) {
-                Sha1Hash hash = extra_.getHash( bin64_t( layer, item ) );
-                if( hash != Sha1Hash::ZERO )
-                    setHash( bin64_t( prevlowlayercount_ + layer, item ), hash );
+    unsigned int layer, item, itemcount;
+    unsigned int layerdiff = lowlayercount_ - prevlowlayercount;
+    unsigned int movelayers = std::min(layerdiff, highlayercount_ );
+    // Move movelayers lower layers of extra_ to new upper layers of real_ starting with layer prevlowlayercount
+    for( layer = 0; layer < movelayers; layer++ ) {
+        itemcount = 1 << ((movelayers - layer) - 1); // Number of items in the layer that could have been added before
+        for( item = 0; item < itemcount; item++ ) {
+            Sha1Hash hash = extra_.getHash( bin64_t( layer, item ) );
+            if( hash != Sha1Hash::ZERO ) {
+                setHash( bin64_t( prevlowlayercount + layer, item ), hash );
+                extra_.setHash( bin64_t( layer, item ), Sha1Hash::ZERO );
             }
         }
-        int
-        movelayers = highlayercount_ - layerdiff;
+    }
+
+    movelayers = highlayercount_ - layerdiff;
+    if( movelayers > 0 ) {
+        // Move layers in extra_ layerdiff layers down
         for( layer = 0; layer < movelayers; layer++ ) {
-            int itemcount = 1 << (movelayers - layer); 
+            itemcount = 1 << ((movelayers - layer) - 1); 
             int fromlayer = layer + layerdiff;
             for( item  = 0; item < itemcount; item++ ) {
                 Sha1Hash hash = extra_.getHash( bin64_t( fromlayer, item ) );
@@ -112,47 +138,44 @@ bool RepeatingHashStorage::setHashCount( int count ) {
                 }
             }
         }
-        prevlowlayercount_ = lowlayercount_;
     }
-    // NOTE: Downsizing not supported!
 
-    return real_.setHashCount( reallength_ );
+    return true;
 }
 
-int RepeatingHashStorage::setHash( bin64_t number, const Sha1Hash& hash ) {
+bool RepeatingHashStorage::setHash( bin64_t number, const Sha1Hash& hash ) {
     int layer = number.layer();
     uint64_t count = number.offset();
-    if( layerlength_[layer] < count )
+    if( layerlength_[layer] <= count )
         setHashCount( ((count-1) * (1 << layer)) + 1);
     if( layer > lowlayercount_ )
-        extra_.setHash( bin64_t( layer - lowlayercount_, count ), hash );
+        return extra_.setHash( bin64_t( layer - lowlayercount_, count ), hash );
     else {
-        uint64_t realcount = count % reallength_;
-        uint64_t iter = (count - realcount) / reallength;
-        uint64_t iterbyte = iter >> 3;
+        uint64_t realcount = count & (mask_ >> layer);
+        uint64_t iter = count >> (lowlayercount_ - layer);
         char buf[] = {0};
-        off_t offset = bin64_t( layer, realcount ) * bmp_itemsize_ + iterbyte;
-        pread( bmp_, buf, 1, offset ); // Reads 0 bytes iff beyond file size, so no bother
-        ((unsigned char*)buf)[0] |= (unsigned char)1 << (item & 0x7);
+        off_t offset = bin64_t( layer, realcount ) * bmp_itemsize_ + (iter >> 3);
+        pread( bmp_, buf, 1, offset ); // Reads 0 bytes iff beyond file size
+        ((unsigned char*)buf)[0] |= (unsigned char)1 << (iter & 0x7);
+        if( !real_.setHash( bin64_t( layer, realcount ), hash ) )
+            return false;
         pwrite( bmp_, buf, 1, offset );
-        real_.setHash( bin64_t( layer, realcount ), hash );
     }
 }
 
-Sha1Hash& RepeatingHashStorage::getHash( bin64_t number ) {
+const Sha1Hash& RepeatingHashStorage::getHash( bin64_t number ) {
     int layer = number.layer();
     uint64_t count = number.offset();
-    if( layerlength_[layer] < count )
+    if( layerlength_[layer] <= count )
         return Sha1Hash::ZERO;
     if( layer > lowlayercount_ )
-        return extra_.getHash( bin64_t( layer - lowlayercount_, count ), hash );
+        return extra_.getHash( bin64_t( layer - lowlayercount_, count ) );
     else {
-        uint64_t realcount = count % reallength_;
-        uint64_t iter = (count - realcount) / reallength;
-        uint64_t iterbyte = iter >> 3;
+        uint64_t realcount = count & (mask_ >> layer);
+        uint64_t iter = count >> (lowlayercount_ - layer);
         char buf[] = {0};
-        off_t offset = bin64_t( layer, realcount ) * bmp_itemsize_ + iterbyte;
-        pread( bmp_, buf, 1, offset ); // Reads 0 bytes iff beyond file size, so no bother
+        off_t offset = bin64_t( layer, realcount ) * bmp_itemsize_ + (iter >> 3);
+        pread( bmp_, buf, 1, offset ); // Reads 0 bytes iff beyond file size
         if( ! ( ((unsigned char*)buf)[0] & ((unsigned char)1 << (iter & 0x7) ) ) )
             return Sha1Hash::ZERO;
         return real_.getHash( bin64_t( layer, realcount ) );

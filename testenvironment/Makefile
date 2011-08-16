@@ -24,7 +24,7 @@ ext/%.o : ../ext/%.cpp
 	mkdir -p ext/
 	$(CXX) -c $(CPPFLAGS) $< -o $@
 
-swift: swift.o sha1.o compat.o sendrecv.o send_control.o hashtree.o bin64.o bins.o channel.o datagram.o transfer.o httpgw.o ext/memoryhashstorage.o ext/filehashstorage.o ext/filedatastorage.o fileoffsetdatastorage.o
+swift: swift.o sha1.o compat.o sendrecv.o send_control.o hashtree.o bin64.o bins.o channel.o datagram.o transfer.o httpgw.o ext/memoryhashstorage.o ext/filehashstorage.o ext/filedatastorage.o fileoffsetdatastorage.o repeatinghashstorage.o
 	$(CXX) $(CPPFLAGS) $(LDFLAGS) -lpthread $^ -o $@
 
 clean:
