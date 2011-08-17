@@ -24,6 +24,7 @@
 #include "compat.h"
 #include "swift.h"
 #include "fileoffsetdatastorage.h"
+#include "repeatinghashstorage.h"
 
 
 using namespace swift;
@@ -85,6 +86,8 @@ void* statisticsThread( void* statargs ) {
     // -- 1 byte 'e'
     // -- 16 bits number of microseconds slept during last period (hex|64 encoded)
     // -- 1 byte '\n'
+
+    // TODO: Add full CPU usage (not only process usage)
     
     // Extract parameters
     char* filename = *(((char***)statargs)[0]);
@@ -157,12 +160,6 @@ void* statisticsThread( void* statargs ) {
         getrusage( RUSAGE_SELF, &ru2 );
         microsuser = (uint32_t)( ru2.ru_utime.tv_sec * 1000000 + ru2.ru_utime.tv_usec );
         microskernel = (uint32_t)( ru2.ru_stime.tv_sec * 1000000 + ru2.ru_stime.tv_usec );
-/*        microsuser = (uint32_t)( ( ru2.ru_utime.tv_sec - ru1.ru_utime.tv_sec ) * 1000000 + ( ru2.ru_utime.tv_usec - ru1.ru_utime.tv_usec ) );
-        microskernel = (uint32_t)( ( ru2.ru_stime.tv_sec - ru1.ru_stime.tv_sec ) * 1000000 + ( ru2.ru_stime.tv_usec - ru1.ru_stime.tv_usec ) );
-        ru1.ru_utime.tv_sec = ru2.ru_utime.tv_sec;
-        ru1.ru_utime.tv_usec = ru2.ru_utime.tv_usec;
-        ru1.ru_stime.tv_sec = ru2.ru_stime.tv_sec;
-        ru1.ru_stime.tv_usec = ru2.ru_stime.tv_usec;*/
 
         rx2 = Channel::totalBytesRead();
         bytesread = rx2 - rx1;
@@ -242,7 +239,7 @@ void* statisticsThread( void* statargs ) {
 
 int main (int argc, char** argv) {
     // nodht TODO
-    // old: daemon, debug, progress, http
+    // old: daemon, progress, http
     //
     // TODO: Add option to seed/leech fake data of given size, with given multiplier  -> 2TB with multiplier can use 250M data times 8K using a bitmap of 250M to keep track of which parts are received
     
@@ -260,6 +257,7 @@ int main (int argc, char** argv) {
         { "tracker",    required_argument,  0, 't' },
         { "maxtime",    required_argument,  0, 'm' },
         { "multiply",   required_argument,  0, '*' },
+        { "size",       required_argument,  0, '+' },
         { "many",       required_argument,  0, '#' },
         { "offset",     required_argument,  0, 'o' },
         { "stat",       required_argument,  0, '@' },
@@ -288,6 +286,10 @@ int main (int argc, char** argv) {
     char* statistics = 0;
     // Array with the addresses of the former two
     char** statargs[] = { &statistics };
+    // Number of repetitions in the file to seed
+    int multiply = 1;
+    // Known size of the file to receive in blocks (0: auto)
+    int knownsize = 0;
     
     bool debug = false;
     
@@ -333,7 +335,11 @@ int main (int argc, char** argv) {
                 wait_time = readPositiveIntArg();
                 break;
             case '*' : // --multiply
-                quit( "--multiply not implemented yet\n" );
+                multiply = readPositiveIntArg();
+                break;
+            case '+' : // --size
+                knownsize = readPositiveIntArg();
+                break;
             case '#' : // --many
                 seedcount = readPositiveIntArg();
                 break;
@@ -360,7 +366,8 @@ int main (int argc, char** argv) {
                 printf( "-l, --listen         [(ip|hostname):]port on which to listen when seeding (defaults to random port)\n" );
                 printf( "-t, --tracker        [(ip|hostname):]port where to find a tracker (defaults to none)\n" );
                 printf( "-m, --maxtime        Time in seconds to remain active, ie. maximum time to leech or seed (positive integer, defaults to infinite)\n" );
-                printf( "--multiply           Fake seeding more data by virtually multiplying the file a given number of times (positive integer, defaults to 1)\n" );
+                printf( "--multiply           Fake seeding more data by virtually multiplying the file a given number of times; also usable for leeching when it is known that such data will arrive (positive integer, power of 2, defaults to 1)\n" );
+                printf( "--size               Size of data to seed/leech in blocks (1 block == 1 hash); required when specifying --multiply; this is used only to initialize the hash tree to the correct size (positive integer, power of 2, defaults to auto)\n" );
                 printf( "--many               Instead of seeding 1 file, seed the given file a given number of times, each next seed starting at +offset from the previous (positive integer, defaults to 1)\n" );
                 printf( "--offset             The offset for each next seed (positive integer, defaults to 1)\n" );
                 printf( "--stat               Write statistics to the specified file (filename, defaults to no statistics)\n" );
@@ -385,6 +392,26 @@ int main (int argc, char** argv) {
         // Check seeding settings
         if( !filename )
             quit( "--file required when seeding\n" );
+    }
+
+    // Check multiply and size arguments
+    if( multiply > 1 && !knownsize )
+        quit( "--size required when leeching with --multiply\n" );
+    if( multiply > 1 ) {
+        int multiplycheck = multiply;
+        while( !( multiplycheck & 1 ) )
+            multiplycheck >>= 1;
+        if( multiplycheck > 1 )
+            quit( "--multiply requires a power of 2 as its argument\n" );
+    }
+    if( knownsize ) {
+        int knownsizecheck = knownsize;
+        if( knownsize < 2 )
+            quit( "--size requires a power of 2 and at least 2 as its argument\n" );
+        while( !( knownsizecheck & 1 ) )
+            knownsizecheck >>= 1;
+        if( knownsizecheck > 1 )
+            quit( "--size requires a power of 2 and at least 2 as its argument\n" );
     }
 
     // Bind to port
@@ -459,10 +486,28 @@ int main (int argc, char** argv) {
     int i;
     for( i = 0; i < seedcount; i++ ) {
         // Essentially this is just swift::Open, but allowing different storages
-        if( mode == 2 && i > 0 )
-            files[i] = new FileTransfer( new FileOffsetDataStorage( filename, offset*i ), root_hash );
-        else
-            files[i] = new FileTransfer( filename, root_hash );
+        if( multiply == 1 ) {
+            if( mode == 2 && i > 0 )
+                files[i] = new FileTransfer( new FileOffsetDataStorage( filename, offset*i ), root_hash );
+            else
+                files[i] = new FileTransfer( filename, root_hash );
+        }
+        else {
+            char buf[1024];
+            snprintf( buf, 1024, "%s.+%03d.mhash", filename, i );
+            RepeatingHashStorage* rhs = new RepeatingHashStorage( buf, multiply );
+            if( !rhs->setHashCount( knownsize ) ) {
+                delete rhs;
+                quit( "Can't set the hash count for file %i to %i\n", i, knownsize );
+            }
+            FileOffsetDataStorage* fods = new FileOffsetDataStorage( filename, offset*i, multiply );
+            if( !fods->setSize( knownsize * 1024 ) ) {
+                delete rhs;
+                delete fods;
+                quit( "Can't set the file size for file %i to %i\n", i, knownsize * 1024 );
+            }
+            files[i] = new FileTransfer( fods, root_hash, rhs );
+        }
         if( !files[i] || !files[i]->file().data_storage() ) {
             for( i = 0; i < seedcount; i++ ) {
                 if( files[i] )

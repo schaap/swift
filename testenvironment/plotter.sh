@@ -38,6 +38,6 @@ set yrange [0:100]
 plot '$1' using 1:4 title 'Usertime (%)' with lines lc rgbcolor "#0000A0", '$1' using 1:7 title 'Kerneltime (%)' with lines lc rgbcolor "#A00000", '$1' using 1:(\$4+\$7) title 'Total time (%)' with lines lc rgbcolor "#00A000"
 set autoscale
 set output '$2.data.png'
-plot '$1' using 1:(\$10/(1024*1024)) title 'Data read (MB/s)' with lines lc rgbcolor "#00C000", '$1' using 1:(\$13/(1024*1024)) title 'Data written (B/s)' with lines lc rgbcolor "#0000C0"
+plot '$1' using 1:(\$10/(1024*1024)) title 'Data read (MB/s)' with lines lc rgbcolor "#00C000", '$1' using 1:(\$13/(1024*1024)) title 'Data written (MB/s)' with lines lc rgbcolor "#0000C0"
 EOF
 
