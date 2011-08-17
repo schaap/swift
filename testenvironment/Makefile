@@ -1,7 +1,7 @@
 CPPFLAGS=-I.. -DDEBUG -g
 LDFLAGS=-I..
 
-TESTS=tests/fileoffsetdatastoragetest
+TESTS=tests/fileoffsetdatastoragetest tests/repeatinghashstoragetest
 
 all: swift statconverter
 
@@ -32,9 +32,12 @@ clean:
 	[ ! -d ext ] || rmdir --ignore-fail-on-non-empty ext/
 
 test: $(TESTS)
-	for a in $(TESTS); do $$a; done
+	for a in $(TESTS); do $(TESTPREFIX) $$a; done
 
 tests/fileoffsetdatastoragetest: tests/fileoffsetdatastoragetest.o fileoffsetdatastorage.o compat.o
+	$(CXX) $(CPPFLAGS) $(LDFLAGS) $(GTESTFLAGS) -lgtest -lpthread $^ -o $@
+
+tests/repeatinghashstoragetest: tests/repeatinghashstoragetest.o repeatinghashstorage.o hashtree.o ext/filehashstorage.o ext/memoryhashstorage.o bin64.o compat.o sha1.o bins.o ext/filedatastorage.o
 	$(CXX) $(CPPFLAGS) $(LDFLAGS) $(GTESTFLAGS) -lgtest -lpthread $^ -o $@
 
 tests/%.o: tests/%.cpp

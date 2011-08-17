@@ -80,11 +80,13 @@ const Sha1Hash& FileHashStorage::getHash( bin64_t number ) {
         print_error( "seeking failed" );
         return Sha1Hash::ZERO;
     }
-    Sha1Hash hash;
+    static Sha1Hash hash; 
+    // NOTE: This construct seems to work, based on empirical testing with a small test program. In it, this construct returned two different values and the object they were assigned to *remained different*.
+    // The uncomfortable part is that I don't see *why*, but it seems related to implicit copying.
     if( read( hash_fd_, &hash, sizeof( Sha1Hash ) ) != sizeof( Sha1Hash ) )
         return Sha1Hash::ZERO;
-    Sha1Hash& ret = hash;
-    return ret;
+    //Sha1Hash& ret = hash;  /// FAIL! FIXME!
+    return hash;
 }
 
 void FileHashStorage::hashLeftRight( bin64_t root ) {

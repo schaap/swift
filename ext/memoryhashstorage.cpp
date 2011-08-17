@@ -7,7 +7,7 @@
 
 using namespace swift;
 
-MemoryHashStorage::MemoryHashStorage( ) : hashes_(1)
+MemoryHashStorage::MemoryHashStorage( ) : hashes_(0)
 {
 }
 
@@ -18,15 +18,21 @@ bool MemoryHashStorage::valid( ) {
     return true;
 }
 
+bool MemoryHashStorage::setSize( int number ) {
+    int oldcap = hashes_.size();
+    hashes_.resize( number );
+    for( int i = oldcap; i < hashes_.capacity(); i++ )
+        hashes_[i] = Sha1Hash::ZERO;
+    return hashes_.size() >= number;
+}
+
 bool MemoryHashStorage::setHashCount( int count ) {
-    hashes_.resize( 2*count );
-    return hashes_.capacity() == 2*count;
+    return setSize( 2*count );
 }
 
 bool MemoryHashStorage::setHash( bin64_t number, const Sha1Hash& hash ) {
-    if( (int) number > hashes_.capacity() ) {
-        hashes_.resize( number+1 );
-        if( (int) number > hashes_.capacity() )
+    if( (int) number >= hashes_.size() ) {
+        if( !setSize( number+1 ) )
             return false;
     }
     hashes_[number] = hash;
@@ -34,7 +40,7 @@ bool MemoryHashStorage::setHash( bin64_t number, const Sha1Hash& hash ) {
 }
 
 const Sha1Hash& MemoryHashStorage::getHash( bin64_t number ) {
-    if( (int) number > hashes_.capacity() )
+    if( (int) number >= hashes_.size() )
         return Sha1Hash::ZERO;
     return hashes_[number];
 }

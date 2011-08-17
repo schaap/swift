@@ -9,6 +9,7 @@ namespace swift {
     class MemoryHashStorage : public HashStorage {
     private:
         std::vector<Sha1Hash> hashes_;
+        bool setSize( int count );
 
     public:
         MemoryHashStorage();

@@ -31,6 +31,7 @@ namespace swift {
     public:
         virtual bool setHashCount( int count ) = 0;
         virtual bool setHash( bin64_t number, const Sha1Hash& hash ) = 0;
+        /// Note that getHash(...) need not be reentrant! This means that after retrieving one value, the next retrieved value might invalidate the first result.
         virtual const Sha1Hash& getHash( bin64_t number ) = 0;
         virtual bool valid() = 0;
 
