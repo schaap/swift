@@ -55,8 +55,8 @@ RepeatingHashStorage::RepeatingHashStorage( const char* filename, unsigned int r
         layerlength <<= 1;
     }
 
-    bmp_itemsize_ = highlayercount_ / 8;
-    if( bmp_itemsize_ * 8  < highlayercount_ )
+    bmp_itemsize_ = (1 << highlayercount_) / 8;
+    if( bmp_itemsize_ * 8  < (1 << highlayercount_) )
         bmp_itemsize_++;
 
     extra_.setHashCount( repeat_ );
@@ -104,14 +104,14 @@ bool RepeatingHashStorage::setHashCount( int count ) {
     mask_ = reallength - 1;
 
     int layerlength = 1;
-    for( int i = highlayercount_; i >= 0; i-- ) {
+    for( int i = highlayercount_ + lowlayercount_; i >= 0; i-- ) {
         layerlength_[i] = layerlength;
         layerlength <<= 1;
     }
 
     unsigned int layer, item, itemcount;
     unsigned int layerdiff = lowlayercount_ - prevlowlayercount;
-    unsigned int movelayers = std::min(layerdiff, highlayercount_ );
+    int movelayers = std::min(layerdiff, highlayercount_ );
     // Move movelayers lower layers of extra_ to new upper layers of real_ starting with layer prevlowlayercount
     for( layer = 0; layer < movelayers; layer++ ) {
         itemcount = 1 << ((movelayers - layer) - 1); // Number of items in the layer that could have been added before
@@ -147,15 +147,15 @@ bool RepeatingHashStorage::setHash( bin64_t number, const Sha1Hash& hash ) {
     int layer = number.layer();
     uint64_t count = number.offset();
     if( layerlength_[layer] <= count )
-        setHashCount( ((count-1) * (1 << layer)) + 1);
-    if( layer > lowlayercount_ )
+        setHashCount( (count + 1) * ( 1 << layer ) );
+    if( layer >= lowlayercount_ )
         return extra_.setHash( bin64_t( layer - lowlayercount_, count ), hash );
     else {
         uint64_t realcount = count & (mask_ >> layer);
-        uint64_t iter = count >> (lowlayercount_ - layer);
+        uint64_t iter = count >> ((lowlayercount_ - layer) - 1);
         char buf[] = {0};
         off_t offset = bin64_t( layer, realcount ) * bmp_itemsize_ + (iter >> 3);
-        pread( bmp_, buf, 1, offset ); // Reads 0 bytes iff beyond file size
+        pread( bmp_, buf, 1, offset ); // Reads 0 bytes iff beyond filesize
         ((unsigned char*)buf)[0] |= (unsigned char)1 << (iter & 0x7);
         if( !real_.setHash( bin64_t( layer, realcount ), hash ) )
             return false;
@@ -168,11 +168,11 @@ const Sha1Hash& RepeatingHashStorage::getHash( bin64_t number ) {
     uint64_t count = number.offset();
     if( layerlength_[layer] <= count )
         return Sha1Hash::ZERO;
-    if( layer > lowlayercount_ )
+    if( layer >= lowlayercount_ )
         return extra_.getHash( bin64_t( layer - lowlayercount_, count ) );
     else {
-        uint64_t realcount = count & (mask_ >> layer);
-        uint64_t iter = count >> (lowlayercount_ - layer);
+        uint64_t realcount = count & (mask_ >> layer);          // repeat 2, basesize 1, count = 1, number.v = 2 (0,1), layer = 0, realcount = 0, iter = 0 should be 1
+        uint64_t iter = count >> ((lowlayercount_ - layer) - 1);
         char buf[] = {0};
         off_t offset = bin64_t( layer, realcount ) * bmp_itemsize_ + (iter >> 3);
         pread( bmp_, buf, 1, offset ); // Reads 0 bytes iff beyond file size

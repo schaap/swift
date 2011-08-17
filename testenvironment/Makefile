@@ -28,11 +28,11 @@ swift: swift.o sha1.o compat.o sendrecv.o send_control.o hashtree.o bin64.o bins
 	$(CXX) $(CPPFLAGS) $(LDFLAGS) -lpthread $^ -o $@
 
 clean:
-	rm -f *.o swift ext/*.o statconverter tests/*.o $(TESTS)
+	rm -f *.o swift ext/*.o statconverter tests/*.o $(TESTS) tests/teststorage.mhash tests/teststorage.mhash.bitmap
 	[ ! -d ext ] || rmdir --ignore-fail-on-non-empty ext/
 
 test: $(TESTS)
-	for a in $(TESTS); do $(TESTPREFIX) $$a; done
+	for a in $(TESTS); do $(TESTPREFIX) $$a $(TESTPOSTFIX); done
 
 tests/fileoffsetdatastoragetest: tests/fileoffsetdatastoragetest.o fileoffsetdatastorage.o compat.o
 	$(CXX) $(CPPFLAGS) $(LDFLAGS) $(GTESTFLAGS) -lgtest -lpthread $^ -o $@

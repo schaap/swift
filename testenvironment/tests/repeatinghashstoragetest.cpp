@@ -3,7 +3,7 @@
 #include <gtest/gtest.h>
 
 // Define REFERENCE as 1 for reference test using MemoryHashStorage, 2 for reference test using FileHashStorage
-#define REFERENCE 2
+#define REFERENCE 0
 
 using namespace swift;
 
@@ -46,6 +46,29 @@ bool checkFilled( HashStorage& rhs, bool* filled, int repeat, int basesize ) {
     return true;
 }
 
+bool checkRepeatSane( HashStorage& rhs, int repeat, int basesize ) {
+    int i, j;
+    for( i = 0; i < repeat; i++ ) {
+        for( j = 0; j < basesize; j++ ) {
+            if( !( rhs.getHash( bin64_t( 0, j ) ) == rhs.getHash( bin64_t( 0, i * basesize + j ) ) ) ) {
+                printf( "bin64_t( 0, %d ) != bin64_t( 0, %d ), but basesize == %d\n", j, i * basesize + j, basesize );
+                return false;
+            }
+        }
+    }
+    for( i = 0; i < basesize; i++ ) {
+        for( j = 0; j < basesize; j++ ) {
+            if( i != j ) {
+                if( rhs.getHash( bin64_t( 0, i ) ) == rhs.getHash( bin64_t( 0, j ) ) ) {
+                    printf( "bin64_t( 0, %d ) == bin64_t( 0, %d ), but basesize == %d\n", i, j, basesize );
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
 TEST(RepeatingHashStorage, SetSizeAndSequentialFillBottomUp) {
     int i, j, repeat, basesize, layersize, layer;
     repeat = 2;
@@ -56,6 +79,7 @@ TEST(RepeatingHashStorage, SetSizeAndSequentialFillBottomUp) {
             for( i = 0; i < repeat * basesize * 2; i++ )
                 filled[i] = false;
             unlink( "tests/teststorage.mhash" );
+            unlink( "tests/teststorage.mhash.bitmap" );
 
 #if REFERENCE == 1
             MemoryHashStorage rhs;
@@ -83,10 +107,7 @@ TEST(RepeatingHashStorage, SetSizeAndSequentialFillBottomUp) {
                 layersize >>= 1;
                 layer++;
             }
-            for( i = 0; i < repeat; i++ ) {
-                for( j = 0; j < basesize; j++ )
-                    ASSERT_TRUE( rhs.getHash( bin64_t( 0, j ) ) == rhs.getHash( bin64_t( 0, i * basesize + j ) ) );
-            }
+            ASSERT_TRUE( checkRepeatSane( rhs, repeat, basesize ) );
 
             basesize <<= 1;
         }
@@ -104,6 +125,7 @@ TEST(RepeatingHashStorage, SetSizeAndSequentialFillTopDown) {
             for( i = 0; i < repeat * basesize * 2; i++ )
                 filled[i] = false;
             unlink( "tests/teststorage.mhash" );
+            unlink( "tests/teststorage.mhash.bitmap" );
 
 #if REFERENCE == 1
             MemoryHashStorage rhs;
@@ -137,6 +159,7 @@ TEST(RepeatingHashStorage, SetSizeAndSequentialFillTopDown) {
                 layersize <<= 1;
                 layer--;
             }
+            ASSERT_TRUE( checkRepeatSane( rhs, repeat, basesize ) );
 
             basesize <<= 1;
         }
@@ -154,6 +177,7 @@ TEST(RepeatingHashStorage, SequentialFillTopDown) {
             for( i = 0; i < repeat * basesize * 2; i++ )
                 filled[i] = false;
             unlink( "tests/teststorage.mhash" );
+            unlink( "tests/teststorage.mhash.bitmap" );
 
 #if REFERENCE == 1
             MemoryHashStorage rhs;
@@ -199,47 +223,61 @@ TEST(RepeatingHashStorage, SequentialFillTopDown) {
 }
 
 TEST(RepeatingHashStorage, SetSizeRandomFill) {
-    int i, j, repeat, basesize, totalsize, layer;
-    repeat = 2;
-    while( repeat <= 16 ) {
-        basesize = 1;
-        while( basesize <= 8 ) {
-            bool filled[repeat*basesize*2];
-            for( i = 0; i < repeat * basesize * 2; i++ )
-                filled[i] = false;
-            unlink( "tests/teststorage.mhash" );
+    printf( "Because of its stochastic nature, this test will run 100 times. Might take a minute.\n" );
+    printf( "Test iteration: " );
+    fflush( stdout );
+    for( int loop = 0; loop < 100; loop++ ) {
+        printf( "%d ", loop );
+        fflush( stdout );
+        int i, j, repeat, basesize, totalsize, layer;
+        repeat = 2;
+        while( repeat <= 16 ) {
+            basesize = 1;
+            while( basesize <= 8 ) {
+                bool filled[repeat*basesize*2];
+                for( i = 0; i < repeat * basesize * 2; i++ )
+                    filled[i] = false;
+                unlink( "tests/teststorage.mhash" );
+                unlink( "tests/teststorage.mhash.bitmap" );
 
 #if REFERENCE == 1
-            MemoryHashStorage rhs;
+                MemoryHashStorage rhs;
 #elif REFERENCE == 2
-            FileHashStorage rhs( "tests/teststorage.mhash" );
+                FileHashStorage rhs( "tests/teststorage.mhash" );
 #else
-            RepeatingHashStorage rhs( "tests/teststorage.mhash", repeat );
+                RepeatingHashStorage rhs( "tests/teststorage.mhash", repeat );
 #endif
-            ASSERT_TRUE( rhs.valid() );
-            ASSERT_TRUE( checkFilled( rhs, filled, repeat, basesize ) );
-            ASSERT_TRUE( rhs.setHashCount( repeat * basesize ) );
-            ASSERT_TRUE( rhs.valid() );
-            ASSERT_TRUE( checkFilled( rhs, filled, repeat, basesize ) );
-            totalsize = repeat * basesize - 1;
-            int toBeFilled[totalsize];
-            for( i = 0; i < totalsize; i++ )
-                toBeFilled[i] = i;
-            while( totalsize ) {
-                int next = random() % totalsize; // biased, but /care
-                ASSERT_TRUE( rhs.setHash( bin64_t( (uint64_t)toBeFilled[next] ), calcHash( bin64_t( (uint64_t)toBeFilled[next] ), basesize ) ) );
-                filled[bin64_t( (uint64_t)toBeFilled[next] )] = true;
-                if( !checkFilled( rhs, filled, repeat, basesize ) ) {
-                    printf( "Just added bin64_t(%d, %d) (repeat = %d, basesize = %d)\n", bin64_t( (uint64_t)toBeFilled[next] ).layer(), bin64_t( (uint64_t)toBeFilled[next] ).offset(), repeat, basesize );
-                    ASSERT_TRUE( false );
+                ASSERT_TRUE( rhs.valid() );
+                ASSERT_TRUE( checkFilled( rhs, filled, repeat, basesize ) );
+                ASSERT_TRUE( rhs.setHashCount( repeat * basesize ) );
+                ASSERT_TRUE( rhs.valid() );
+                ASSERT_TRUE( checkFilled( rhs, filled, repeat, basesize ) );
+                totalsize = 2 * repeat * basesize - 1;
+                int toBeFilled[totalsize];
+                for( i = 0; i < totalsize; i++ )
+                    toBeFilled[i] = i;
+                while( totalsize ) {
+                    int next = random() % totalsize; // biased, but /care
+                    ASSERT_TRUE( rhs.setHash( bin64_t( (uint64_t)toBeFilled[next] ), calcHash( bin64_t( (uint64_t)toBeFilled[next] ), basesize ) ) );
+                    filled[bin64_t( (uint64_t)toBeFilled[next] )] = true;
+                    if( !checkFilled( rhs, filled, repeat, basesize ) ) {
+                        printf( "Just added bin64_t(%d, %d) (repeat = %d, basesize = %d)\n", bin64_t( (uint64_t)toBeFilled[next] ).layer(), bin64_t( (uint64_t)toBeFilled[next] ).offset(), repeat, basesize );
+                        ASSERT_TRUE( false );
+                    }
+                    toBeFilled[next] = toBeFilled[--totalsize];
                 }
-                toBeFilled[next] = toBeFilled[--totalsize];
-            }
+                for( i = 0; i < 2 * repeat * basesize - 1; i++ ) {
+                    if( !filled[i] )
+                        ASSERT_FALSE( false );
+                }
+                ASSERT_TRUE( checkRepeatSane( rhs, repeat, basesize ) );
 
-            basesize <<= 1;
+                basesize <<= 1;
+            }
+            repeat <<= 1;
         }
-        repeat <<= 1;
     }
+    printf( "\n" );
 }
 
 int main( int argc, char** argv ) {
