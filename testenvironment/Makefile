@@ -5,7 +5,7 @@
 
 # When adding things, be sure to:
 # - Add build targets where necessary
-# - Add object targets for files other than ../ext/%.cpp (ext/%.o) ../%.cpp (%.o) or test/%.cpp (test/%.o)
+# - Add object targets for files other than ../ext/%.cpp (ext/%.o) ../%.cpp (%.o) or tests/%.cpp (tests/%.o)
 # - Update "all" if needed
 # - Update "clean" if needed
 # - Update "TESTS" if needed
@@ -70,7 +70,7 @@ ext/%.o : ../ext/%.cpp
 	mkdir -p ext/
 	$(CXX) -c $(CPPFLAGS) $< -o $@
 
-# Object files from testenvironment/test/
+# Object files from testenvironment/tests/
 
 tests/%.o: tests/%.cpp
 	$(CXX) -c $(CPPFLAGS) $(GTESTFLAGS) $< -o $@
