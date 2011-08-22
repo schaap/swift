@@ -109,12 +109,12 @@ bool FileOffsetDataStorage::setSize( size_t len ) {
     size_t flen = len / repeat_;
     if( flen * repeat_ < len )
         flen++;
-    bool ret = file_resize( fd_, flen );
-    if( ret ) {
+    int ret = file_resize( fd_, flen );
+    if( !ret ) {
         size_ = flen;
         fullsize_ = len;
     }
-    return ret;
+    return !ret;
 }
 
 bool FileOffsetDataStorage::valid( ) {

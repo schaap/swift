@@ -18,7 +18,7 @@ TESTS=tests/fileoffsetdatastoragetest tests/repeatinghashstoragetest
 
 # "make all"
 
-all: swift statconverter genfakedata
+all: swift statconverter genfakedata checkfakedata
 
 # Actual targets
 
@@ -29,6 +29,9 @@ swift: swift.o sha1.o compat.o sendrecv.o send_control.o hashtree.o bin64.o bins
 	$(CXX) $(CPPFLAGS) $(LDFLAGS) -lpthread $^ -o $@
 
 genfakedata: genfakedata.o compat.o
+	$(CXX) $(CPPFLAGS) $(LDFLAGS) $^ -o $@
+
+checkfakedata: checkfakedata.o compat.o
 	$(CXX) $(CPPFLAGS) $(LDFLAGS) $^ -o $@
 
 # Test targets
@@ -53,6 +56,9 @@ fileoffsetdatastorage.o: fileoffsetdatastorage.cpp
 genfakedata.o: genfakedata.cpp
 	$(CXX) -c $(CPPFLAGS) $< -o $@
 
+checkfakedata.o: checkfakedata.cpp
+	$(CXX) -c $(CPPFLAGS) $< -o $@
+
 # Object files from libswift
 
 %.o: ../%.cpp
@@ -72,7 +78,7 @@ tests/%.o: tests/%.cpp
 # Misc
 
 clean:
-	rm -f *.o swift ext/*.o statconverter tests/*.o $(TESTS) tests/teststorage.mhash tests/teststorage.mhash.bitmap genfakedata
+	rm -f *.o swift ext/*.o statconverter tests/*.o $(TESTS) tests/teststorage.mhash tests/teststorage.mhash.bitmap genfakedata checkfakedata
 	[ ! -d ext ] || rmdir --ignore-fail-on-non-empty ext/
 
 test: $(TESTS)

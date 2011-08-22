@@ -1,4 +1,3 @@
-#define _BSD_SOURCE
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -26,7 +25,7 @@ int main( int argc, char** argv ) {
         return -1;
     }
 
-    long int n = strtol( argv[2], NULL, 10 );
+    size_t n = strtol( argv[2], NULL, 10 );
     if( n < 1 ) {
         printf( "Positive size in bytes expected, got %s\n", argv[2] );
         return -1;
@@ -48,7 +47,7 @@ int main( int argc, char** argv ) {
     file_resize( f, n );
 
     uint32_t i, j;
-    int left, done;
+    int left, done, ret;
     char buf[4096];
     for( i = 0; i < n / 4; i += 1024 ) {
         if( !( i & 0x3FFFF ) )
@@ -58,11 +57,18 @@ int main( int argc, char** argv ) {
         done = pwrite( f, buf, 4096, (i << 2) );
         left = 4096 - done;
         while( left > 0 ) {
-            done += pwrite( f, buf + done, left, (i << 2) + left );
-            left = 4096 - done;
+            ret = pwrite( f, buf + done, left, (i << 2) + left );
+            if( ret < 0 ) {
+                perror( "more writing" );
+                close( f );
+                return -2;
+            }
+            done += ret;
+            left -= ret;
         }
         if( left < 0 ) {
             perror( "writing" );
+            close( f );
             return -2;
         }
         if( i == 0xFFFFFFFF - 1023 ) {
@@ -73,9 +79,15 @@ int main( int argc, char** argv ) {
     if( !( i & 0x3FFFF ) )
         printf( "Status: %liM written\n", (long int)( i / ( 1 << 18 ) ) );
 
-    long int size = file_size( f );
+    size_t size = file_size( f );
+    if( size < 0 ) {
+        perror( "reading size\n" );
+        return -3;
+    }
     if( size != n )
-        printf( "Warning: size was supposed to be %li, but turned out to be %li.\n", n, size );
+        printf( "Warning: size was supposed to be %lli, but turned out to be %lli.\n", (long long int)n, (long long int)size );
+
+    close( f );
 
     return 0;
 }
