@@ -262,6 +262,7 @@ int main (int argc, char** argv) {
         { "offset",     required_argument,  0, 'o' },
         { "stat",       required_argument,  0, '@' },
         { "debug",      no_argument,        0, 'd' },
+        { "baseoffset", required_argument,  0, '$' },
 
         {0, 0, 0, 0}
     };
@@ -290,6 +291,8 @@ int main (int argc, char** argv) {
     int multiply = 1;
     // Known size of the file to receive in blocks (0: auto)
     int knownsize = 0;
+    // Offset for first seed
+    int baseoffset = 0;
     
     bool debug = false;
     
@@ -349,6 +352,9 @@ int main (int argc, char** argv) {
             case '@' : // --stat
                 statistics = strdup( optarg );
                 break;
+            case '$' : // --baseoffset
+                baseoffset = readPositiveIntArg();
+                break;
             case 'd' :
                 debug = true;
                 break;
@@ -371,6 +377,7 @@ int main (int argc, char** argv) {
                 printf( "--many               Instead of seeding 1 file, seed the given file a given number of times, each next seed starting at +offset from the previous (positive integer, defaults to 1)\n" );
                 printf( "--offset             The offset for each next seed (positive integer, defaults to 1)\n" );
                 printf( "--stat               Write statistics to the specified file (filename, defaults to no statistics)\n" );
+                printf( "--baseoffset         Offset into the file for the first seed (positive integer, defaults to 0)\n" );
                 printf( "-d, --debug          Output debug info to standard out (defaults to no)\n" );
                 return 0;
         }
@@ -487,8 +494,8 @@ int main (int argc, char** argv) {
     for( i = 0; i < seedcount; i++ ) {
         // Essentially this is just swift::Open, but allowing different storages
         if( multiply == 1 ) {
-            if( mode == 2 && i > 0 )
-                files[i] = new FileTransfer( new FileOffsetDataStorage( filename, offset*i ), root_hash );
+            if( mode == 2 && ( i > 0 || baseoffset > 0 ) )
+                files[i] = new FileTransfer( new FileOffsetDataStorage( filename, baseoffset+offset*i ), root_hash );
             else
                 files[i] = new FileTransfer( filename, root_hash );
         }
