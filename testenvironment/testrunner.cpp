@@ -622,6 +622,11 @@ void validateConfigAndGenerateScripts( ) {
         }
     }
 
+    // TODO At this point in time: is it possible to
+    // - run the script
+    // - get the necessary data from the script
+    // - then generate the test scripts and run those separately?
+
     // For each test, generate its script
     // TODO: for each test
     for( i = 0; i < testCount; i++ ) {
