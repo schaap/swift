@@ -15,6 +15,8 @@ struct machine {
     int icount;
     int coreCount;
     char* cores[MAXCORE];
+    int fileCount;
+    char* files[MAXFILE];
 };
 
 struct role {
@@ -40,6 +42,7 @@ struct file {
     size_t isize;
     char* offset;
     size_t ioffset;
+    Sha1Hash hash;
 };
 
 struct test {
@@ -188,6 +191,15 @@ void readConfig( const char* filename ) {
                                         quit( "Invalid size specifier for file %s\n", f.name );
                                 }
                             }
+                            if( f.isize > 512 * 1024 * 1024 ) {
+                                int p = 512*1024*1024;
+                                while( p < f.isize )
+                                    p <<= 1;
+                                if( p != f.isize )
+                                    quit( "Invalid size specifier for file %s: sizes above 512M should be powers of 2\n", f.name );
+                            }
+                            if( f.isize & 0x3 )
+                                quit( "Invalid size specifier for file %s: sizes should be a multiple of 4\n", f.name );
                             break;
                         }
                         if( !strcmp( nodeName, "test" ) ) {
@@ -355,12 +367,13 @@ void readConfig( const char* filename ) {
 
 void validateConfigAndGenerateScripts( ) {
     int i, j, k, l;
+    bool found;
 
-    // Validate test-role references to machines, cores and files
-    // Also register which machine uses which cores
+    // == Validate test-role references to machines, cores and files
+    // == Also register which machine uses which cores and which files
     for( i = 0; i < testCount; i++ ) {
         for( j = 0; j < tests[i].roleCount; j++ ) {
-            bool found;
+            // Check for validity of each role's core
             found = false;
             for( k = 0; k < coreCount; k++ ) {
                 if( !strcmp( cores[k].name, tests[i].roles[j].core ) ) {
@@ -370,18 +383,7 @@ void validateConfigAndGenerateScripts( ) {
             }
             if( !found )
                 quit( "Test %s role %i refers to core %s which does not exist\n", tests[i].name, j, tests[i].roles[j].core );
-            for( l = 0; l < tests[i].roles[j].machineCount; l++ ) {
-                found = false;
-                for( k = 0; k < machineCount; k++ ) {
-                    if( !strcmp( machines[k].name, tests[i].roles[j].machines[l] ) ) {
-                        machines[k].cores[machines[k].coreCount++] = tests[i].roles[j].core;
-                        found = true;
-                        break;
-                    }
-                }
-                if( !found )
-                    quit( "Test %s role %i refers to machine %s which does not exist\n", tests[i].name, j, tests[i].roles[j].machines[l] );
-            }
+            // Check for validity of each role's file
             found = false;
             for( k = 0; k < fileCount; k++ ) {
                 if( !strcmp( files[k].name, tests[i].roles[j].file ) ) {
@@ -391,25 +393,55 @@ void validateConfigAndGenerateScripts( ) {
             }
             if( !found )
                 quit( "Test %s role %i refers to file %s which does not exist\n", tests[i].name, j, tests[i].roles[j].file );
+            // Check for validity of each role's machines
+            for( l = 0; l < tests[i].roles[j].machineCount; l++ ) {
+                found = false;
+                for( k = 0; k < machineCount; k++ ) {
+                    if( !strcmp( machines[k].name, tests[i].roles[j].machines[l] ) ) {
+                        // Machine found: register used core with the machine if needed
+                        for( m = 0; m < machines[k].coreCount; m++ ) {
+                            if( !strcmp( machines[k].cores[m], tests[i].roles[j].core ) ) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if( !found )
+                            machines[k].cores[machines[k].coreCount++] = tests[i].roles[j].core;
+                        // Machine found: register used file with the machine if needed, only if seeding
+                        if( !strcmp( tests[i].roles[j].type, "seed" ) ) {
+                            found = false;
+                            for( m = 0; m < machines[k].fileCount; m++ ) {
+                                if( !strcmp( machines[k].files[m], tests[i].roles[j].file ) ) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if( !found )
+                                machines[k].files[machines[k].fileCount++] = tests[i].roles[j].file;
+                        }
+                        // Machine found
+                        found = true;
+                        break;
+                    }
+                }
+                if( !found )
+                    quit( "Test %s role %i refers to machine %s which does not exist\n", tests[i].name, j, tests[i].roles[j].machines[l] );
+            }
         }
     }
 
-    /*
-     * machines
-     * cores
-     * files
-     * tests
-     *   roles
-     */
-    
     // Create temporary script
     FILE* script = tmpfile();
     if( !script )
         quit( "Can't create temporary script\n" );
     fprintf( script, "#!/bin/bash\n" );
 
-    // Check validity of machines and users: can each machine be accessed?
+    // == Check validity of machines and users: can each machine be accessed?
     for( i = 0; i < machineCount; i++ ) {
+        // Creates a function in the script for sending command to the machine using ssh
+        // Call using
+        //    ssh_machine_%i "commands" || cleanup -1
+        // where %i is the index of the machine in machines. Also be sure to return non-zero from your commands on error.
         fprintf( script, "function ssh_machine_%i {\n", i );
         if( strcmp( machines[i].address, "DAS4" ) )
             fprintf( script, "    ssh -T -n -o BatchMode=yes -h \"%s\"", machines[i].address );
@@ -421,10 +453,44 @@ void validateConfigAndGenerateScripts( ) {
             fprintf( script, " %s", machines[i].params );
         fprintf( script, " $1 || return -1;\n" );
         fprintf( script, "}\n" );
+        // Creates a function in the script for sending files to the machine using scp
+        // Call using
+        //    scp_to_machine_%i localfile remotefile
+        fprintf( script, "function scp_to_machine_%i {\n", i );
+        fprintf( script, "scp -o BatchMode=yes " );
+        if( machines[i].params )
+            fprintf( script, "%s ", machines[i].params );
+        fprintf( script, "$1 ", l );
+        if( machines[i].user )
+            fprintf( script, "\"%s\"@", machines[i].user );
+        if( strcmp( machines[i].address, "DAS4" ) )
+            fprintf( script, "\"%s\"", machines[i].address );
+        else
+            fprintf( script, "fs3.das4.tudelft.nl" );
+        fprintf( script, ":$2 || cleanup -1\n", i, l )
+        fprintf( script, "}\n" );
+        // Creates a function in the script for retrieving files from the machine using scp
+        // Call using
+        //    scp_from_machine_%i remotefile localfile
+        fprintf( script, "function scp_from_machine_%i {\n", i );
+        fprintf( script, "scp -o BatchMode=yes " );
+        if( machines[i].params )
+            fprintf( script, "%s ", machines[i].params );
+        if( machines[i].user )
+            fprintf( script, "\"%s\"@", machines[i].user );
+        if( strcmp( machines[i].address, "DAS4" ) )
+            fprintf( script, "\"%s\"", machines[i].address );
+        else
+            fprintf( script, "fs3.das4.tudelft.nl" );
+        fprintf( script, ":$1 $2 || cleanup -1\n", i, l )
+        fprintf( script, "}\n" );
+        // Checks reachability of machine
         fprintf( script, "ssh_machine_%i || exit -1\n", i );
     }
 
-    // Check validity of each core: can each core be packaged? Can it be compiled locally and does the program then exist?
+    // == Check validity of each core: can each core be packaged? Can it be compiled locally and does the program then exist?
+    // Create a cleanup file. This file should have code appended to cleanup things when errors occur or testing has finished. See existing code for examples of concatenating to it.
+    // The cleanup function is available after this as well. Call it with an exit argument to end the script cleanly.
     fprintf( script, "CLEANUPFILE=`mktemp`\n" );
     fprintf( script, "chmod +x CLEANUPFILE\n" );
     fprintf( script, "[ -x CLEANUPFILE ] || exit -1\n" );
@@ -433,18 +499,27 @@ void validateConfigAndGenerateScripts( ) {
     fprintf( script, "    . $CLEANUPFILE\n" );
     fprintf( script  "    exit $1\n" );
     fprintf( script, "}\n" );
+    // Create a local temporary directory for storage
     fprintf( script, "TARDIR=`mktemp -d`\n[ \"X${TARDIR}X\" == \"XX\" ] && exit -1\n" );
     fprintf( script, "(\ncat <<EOL\n#!/bin/bash\nrm -rf $TARDIR\nEOL\n) >> $CLEANUPFILE\n" );
     fprintf( script, "CURDIR=`pwd`\n" );
+    // Create a tarball for the testenvironment in the temporary local storage
+    fprintf( script, "make clean || cleanup -1\n" );
+    fprintf( script, "tar cf ${TARDIR}/testenvironment.tar . || cleanup -1\n" );
+    fprintf( script, "bzip2 ${TARDIR}/testenvironment.tar || cleanup -1\n" );
+    // Check whether the needed tools of the testenvironment compile locally
+    fprintf( script, "make genfakedata || cleanup -1\n" );
     for( i = 0; i < coreCount; i++ ) {
         if( !cores[i].localdir )
             cores[i].localdir = strdup( "../" );
+        // Create a tarball for the core in the temporary local storage
         fprintf( script, "cd %s || cleanup -1\n", cores[i].localdir );
         fprintf( script, "make clean\n" ); // Not checked: SHOULD be available, but...
         fprintf( script, "tar cf ${TARDIR}/core_%i.tar . || cleanup -1\n", i );
         fprintf( script, "bzip2 ${TARDIR}/core_%i.tar || cleanup -1\n", i );
         if( !cores[i].compdir )
             cores[i].compdir = strdup( "testenvironment/" );
+        // Check whether the core compiles locally and the program exists after
         fprintf( script, "cd %s || cleanup -1\n", cores[i].compdir );
         fprintf( script, "make || cleanup -1\n" );
         if( !cores[i].program )
@@ -453,14 +528,60 @@ void validateConfigAndGenerateScripts( ) {
         fprintf( script, "cd ${CURDIR}\n" );
     }
 
-    // For each machine, copy and compile each core to be used on that machine. Is the core compiled succesfully and does the program exist? Keep track of temp dirs for this.
+    // For each file, precalculate the hash
+    for( i = 0; i < fileCount; i++ ) {
+        // Create some temporary file to write fake data to. These fake data files will be regenerated at each machine since generating is faster than copying.
+        size_t size = files[i].isize;
+        FILE* data = tmpfile();
+        if( !data )
+            quit( "can't create temporary data file\n" );
+        int datan = fileno( data );
+        int filesize;
+        if( size > 512*1024*1024 )
+            filesize = 512*1024*1024;
+        else
+            filesize = size;
+        if( generateFakeData( datan, filesize ) )
+            quit( "could not write fake data\n" );
+        
+        MemoryHashStorage mhs;
+        FileOffsetDataStorage fods( datan, files[i].ioffset );
+        if( !fods.valid() )
+            quit( "can't read back from temporary data file\n" );
+        HashTree ht( fods, Sha1Hash::ZERO, mhs );
+        Sha1Hash hash = ht.root_hash();
+        if( size > filesize ) {
+            MemoryHashStorage mhs2;
+            int max = size/filesize;
+            for( j = 0; j < max; j++ )
+                mhs2.setHash( bin64(0,j), hash );
+            int lvl = 0;
+            do {
+                max >>= 1;
+                lvl++;
+                for( j = 0; j < max; j++ )
+                    mhs2.hashLeftRight( bin64_t(lvl, j) );
+            } while( max > 1 );
+            files[i].hash = mhs.getHash( bin64_t(lvl, 0) );
+        }
+        else
+            files[i].hash = hash;
+        // After this files[i].hash contains the root hash for file i
+    }
+
+    // For each machine, copy and compile each core to be used on that machine. Is the core compiled succesfully and does the program exist? Keep track of temp dirs for this. Also install the needed data files on the machine.
     for( i = 0; i < machineCount; i++ ) {
+        // Create the remote directory for temporary storage of data and cores
         if( machines[i].tmpdir )
             fprintf( script, "REMOTECOREDIR_MACHINE%i=`ssh_machine_%i \"mktemp -d --tmpdir \\\"%s\\\"\" || cleanup -1`\n", i, machines[i].tmpdir );
         else
             fprintf( script, "REMOTECOREDIR_MACHINE%i=`ssh_machine_%i \"mktemp -d\" || cleanup -1`\n", i );
         fprintf( script, "[ \"X${REMOTECOREDIR_MACHINE%i}X\" == \"XX\" ] && cleanup -1\n" );
         fprintf( script, "(\ncat <<EOL\nssh_machine_%i \"rm -rf $REMOTECOREDIR_MACHINE%i\"\nEOL\n) >> $CLEANUPFILE\n", i, i );
+        // Send the testenvironment to the remote machine, create a remote directory for the testenvironment files and make them
+        fpritnf( script, "scp_machine_%1$i $TARDIR/testenvironment.tar.bz2 $REMOTECOREDIR_MACHINE%1$i/testenvironment.tar.bz2 || cleanup -1\n", i );
+        fprintf( script, "ssh_machine_%1$i \"cd $REMOTECOREDIR_MACHINE%1$i || exit -1; mkdir testenvironment || exit -1; tar xjf ../testenvironment.tar.bz2 || exit -1; make genfakedata || exit -1\" || cleanup -1\n", i );
+        // Go over all cores that will be used on the machine
         for( j = 0; j < machines[i].coreCount; j++ ) {
             for( k = 0; k < coreCount; k++ ) {
                 if( !strcmp( machines[i].cores[j], cores[k] ) ) {
@@ -468,25 +589,46 @@ void validateConfigAndGenerateScripts( ) {
                     break;
                 }
             }
-            fprintf( script, "scp -o BatchMode=yes " );
-            if( machines[i].params )
-                fprintf( script, "%s ", machines[i].params );
-            fprintf( script, "$TARDIR/core_%i.tar.bz2 ", l );
-            if( machines[i].user )
-                fprintf( script, "\"%s\"@", machines[i].user );
-            if( strcmp( machines[i].address, "DAS4" ) )
-                fprintf( script, "\"%s\"", machines[i].address );
-            else
-                fprintf( script, "fs3.das4.tudelft.nl" );
-            fprintf( script, ":$REMOTECOREDIR_MACHINE%i/core_%i.tar.bz2 || cleanup -1\n", i, l )
+            // For each core: send the core to the remote machine, create a remote directory for the core and build the core
+            fprintf( script, "scp_to_machine_%1$i $TARDIR/core_%2$i.tar.bz2 $REMOTECOREDIR_MACHINE%1$i/core_%2$i.tar.bz2 || cleanup -1\n", i, l );
             fprintf( script, "ssh_machine_%1$i \"cd $REMOTECOREDIR_MACHINE%1$i || exit -1; mkdir core_%2$i || exit -1; cd core_%2$i || exit -1; tar xjf ../core_%2$i.tar.bz2 || exit -1; cd %3$s || exit -1; make || exit -1; [ -x %4$s ] || exit -1;\" || cleanup -1\n", i, l, cores[l].compdir, cores[l].program );
         }
-
-    // For each file, precalculate the hash
-    for( i = 0; i < fileCount; i++ ) {
-        // TODO: Build a small tool that allows usage of libswift to precalculate the hashes of files
+        // Figure what filesizes are needed for fake data on the remote machine
+        int filesizes[MAXFILE];
+        int filesizecount = 0;
+        for( j = 0; j < machines[i].fileCount; j++ ) {
+            for( k = 0; k < fileCount; k++ ) {
+                if( !strcmp( machines[i].files[j], files[k] ) ) {
+                    l = k;
+                    break;
+                }
+            }
+            int fs = files[l].isize;
+            if( fs > 512*1024*1024 )
+                fs = 512*1024*1024;
+            found = false;
+            for( k = 0; k < filesizecount; k++ ) {
+                if( filesizes[k] == fs ) {
+                    found = true;
+                    break;
+                }
+            }
+            if( !found )
+                filesizes[filesizecount++] = fs;
+        }
+        for( j = 0; j < filesizes; j++ ) {
+            // For each filesize: generate the fake data file of the needed size
+            fprintf( script, "ssh_machine_%1$i \"cd $REMOTECOREDIR_MACHINE%1$i/testenvironment || exit -1; ./genfakedata ../fakedata_%2$i %2$i || exit -1\" || cleanup - 1\n", i, filesizes[j] );
+        }
     }
+
     // For each test, generate its script
+    // TODO: for each test
+    for( i = 0; i < testCount; i++ ) {
+        // TODO: Create a small utility that can see when a seeder is online
+        // TODO: Find out how to make sure a task doesn't run longer than X
+        // TODO: Find out how to create multiple processes/threads that can each govern a single role script or even role-machine script
+    }
 }
 
 /*
@@ -496,6 +638,7 @@ struct file {
     size_t isize;
     char* offset;
     size_t ioffset;
+    Sha1Hash hash;
 };
 
 struct core {

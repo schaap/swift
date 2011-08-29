@@ -26,6 +26,19 @@ FileOffsetDataStorage::FileOffsetDataStorage( const char* filename, size_t offse
     fullsize_ = repeat_ * size_;
 }
 
+FileOffsetDataStorage::FileOffsetDataStorage( int f, size_t offset, unsigned int repeat ) : offset_(offset), size_(0), fullsize_(0), cur_(0), fd_(f), filename_(0), repeat_(repeat) {
+    if( fd_ < 0 ) {
+        fd_ = 0;
+        print_error( "file is not open" );
+        return;
+    }
+    if( !repeat_ )
+        repeat_ = 1;
+    filename_ = strdup( "[none]" );
+    size_ = file_size( fd_ );
+    fullsize_ = repeat_ * size_;
+}
+
 FileOffsetDataStorage::~FileOffsetDataStorage( ) {
     if( fd_ )
         close( fd_ );

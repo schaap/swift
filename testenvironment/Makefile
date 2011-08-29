@@ -28,7 +28,7 @@ statconverter: statconverter.o
 swift: swift.o sha1.o compat.o sendrecv.o send_control.o hashtree.o bin64.o bins.o channel.o datagram.o transfer.o httpgw.o ext/memoryhashstorage.o ext/filehashstorage.o ext/filedatastorage.o fileoffsetdatastorage.o repeatinghashstorage.o
 	$(CXX) $(CPPFLAGS) $(LDFLAGS) -lpthread $^ -o $@
 
-genfakedata: genfakedata.o compat.o
+genfakedata: genfakedata.o fakedata.o compat.o
 	$(CXX) $(CPPFLAGS) $(LDFLAGS) $^ -o $@
 
 checkfakedata: checkfakedata.o compat.o
@@ -54,6 +54,9 @@ fileoffsetdatastorage.o: fileoffsetdatastorage.cpp
 	$(CXX) -c $(CPPFLAGS) $< -o $@
 
 genfakedata.o: genfakedata.cpp
+	$(CXX) -c $(CPPFLAGS) $< -o $@
+
+fakedata.o: fakedata.cpp
 	$(CXX) -c $(CPPFLAGS) $< -o $@
 
 checkfakedata.o: checkfakedata.cpp
