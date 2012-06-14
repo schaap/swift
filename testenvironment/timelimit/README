@@ -1,4 +1,0 @@
-timelimit utility
-sends a signal after a warning time and another signal after again some kill time, just like init
-
-http://devel.ringlet.net/sysutils/timelimit/
