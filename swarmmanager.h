@@ -1,5 +1,7 @@
-#include "hashtree.h"
 #include <time.h>
+#include <vector>
+#include <list>
+#include "hashtree.h"
 
 namespace swift {
     class SwarmManager;
@@ -17,7 +19,7 @@ namespace swift {
 
         bool touch();
         bool isActive();
-        const Sha1Hash& const rootHash();
+        const Sha1Hash& rootHash();
         int id();
         bool toBeRemoved();
 
@@ -50,15 +52,15 @@ namespace swift {
         // Structures and functions for deferred removal of active swarms
         std::list<int> swarmsToBeRemoved_;
         struct event* eventCheckToBeRemoved_;
-        static void checkSwarmsToBeRemovedCallback(evutil_socket_t fd, short events, void* arg);
-        void checkSwarmsToBeRemoved();
+        static void CheckSwarmsToBeRemovedCallback(evutil_socket_t fd, short events, void* arg);
+        void CheckSwarmsToBeRemoved();
 
         // Looking up swarms by rootHash, internal functions
-        int getSwarmLocation( const std::vector<SwarmManager*>& list, const Sha1Hash& rootHash )
-        SwarmData* getSwarmData( const Sha1Hash& rootHash );
+        int GetSwarmLocation( const std::vector<SwarmData*>& list, const Sha1Hash& rootHash );
+        SwarmData* GetSwarmData( const Sha1Hash& rootHash );
 
         // Internal method to find the oldest swarm and deactivate it
-        bool deactivateSwarm();
+        bool DeactivateSwarm();
 
         // Structures to keep track of active swarms
         int maxActiveSwarms_;
@@ -66,21 +68,22 @@ namespace swift {
         std::vector<SwarmData*> activeSwarms_;
     public:
         // Singleton
-        static SwarmManager& getManager();
+        static SwarmManager& GetManager();
 
         // Add and remove swarms
-        void addSwarm( const SwarmData& swarm );
-        void removeSwarm( const Sha1Hash& rootHash );
+        SwarmData* AddSwarm( const SwarmData& swarm );
+        void RemoveSwarm( const Sha1Hash& rootHash );
 
         // Find a swam, either by id or root hash
-        SwarmData* findSwarm( int id );
-        SwarmData* findSwarm( const Sha1Hash& rootHash );
+        SwarmData* FindSwarm( int id );
+        SwarmData* FindSwarm( const Sha1Hash& rootHash );
 
         // Activate a swarm, so it can be used (not active swarms can't be read from/written to)
-        SwarmData* activateSwarm( const Sha1Hash& rootHash );
+        SwarmData* ActivateSwarm( const Sha1Hash& rootHash );
+        void BuildSwarm( SwarmData* swarm );
 
         // Manage maximum of active swarms
-        int getMaximumActiveSwarms();
-        void setMaximumActiveSwarms( int newMaxActiveSwarms );
+        int GetMaximumActiveSwarms();
+        void SetMaximumActiveSwarms( int newMaxActiveSwarms );
     };
 }
