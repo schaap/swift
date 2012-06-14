@@ -54,7 +54,7 @@ void ZeroState::LibeventCleanCallback(int fd, short event, void *arg)
         		delset.insert(ft);
         	}
         	else
-        		dprintf("%s zero clean %s has %d peers\n",tintstr(),ft->root_hash().hex().c_str(), ft->GetChannels().size() );
+        		dprintf("%s zero clean %s has %d peers\n",tintstr(),ft->root_hash().hex().c_str(), (int)ft->GetChannels().size() );
         }
     }
 

@@ -116,12 +116,14 @@ ssize_t  Storage::Write(const void *buf, size_t nbyte, int64_t offset)
 
 			// multifile entry will fit into first chunk
 			const char *bufstr = (const char *)buf;
-			int n = sscanf((const char *)&bufstr[strlen(MULTIFILE_PATHNAME.c_str())+1],"%lld",&spec_size_);
+            long long int lli_in;
+			int n = sscanf((const char *)&bufstr[strlen(MULTIFILE_PATHNAME.c_str())+1],"%lld",&lli_in);
 			if (n != 1)
 			{
 				errno = EINVAL;
 				return -1;
 			}
+            spec_size_ = (int64_t)lli_in;
 
 			//dprintf("%s %s storage: Write: multifile: specsize %lld\n", tintstr(), roothashhex().c_str(), spec_size_ );
 
@@ -328,12 +330,14 @@ int Storage::ParseSpec(StorageFile *sf)
 		std::string sizestr = pline.substr(idx+1,pline.length());
 
 		int64_t fsize=0;
-        int n = sscanf(sizestr.c_str(),"%lld",&fsize);
+        long long int lld_in;
+        int n = sscanf(sizestr.c_str(),"%lld",&lld_in);
         if (n == 0)
         {
         	ret = -1;
         	break;
         }
+        fsize = (int64_t)lld_in;
 
         // Check pathname safety
         if (specpath.substr(0,1) == MULTIFILE_PATHNAME_FILE_SEP)
@@ -372,7 +376,7 @@ int Storage::ParseSpec(StorageFile *sf)
 	for (iter = sfs_.begin(); iter < sfs_.end(); iter++)
 	{
 		StorageFile *sf = *iter;
-		dprintf("%s %s storage: parsespec: Got %s start %lld size %lld\n", tintstr(), roothashhex().c_str(), sf->GetSpecPathName().c_str(), sf->GetStart(), sf->GetSize() );
+		dprintf("%s %s storage: parsespec: Got %s start %lld size %lld\n", tintstr(), roothashhex().c_str(), sf->GetSpecPathName().c_str(), (long long int)sf->GetStart(), (long long int)sf->GetSize() );
 	}
 
 
@@ -508,7 +512,7 @@ int64_t Storage::GetReservedSize()
 			totaldisksize += fsize;
 	}
 
-	fprintf(stderr,"storage: getdisksize: total already sized is %lld\n", totaldisksize );
+	fprintf(stderr,"storage: getdisksize: total already sized is %lld\n", (long long int)totaldisksize );
 
 	return totaldisksize;
 }
@@ -540,12 +544,12 @@ int Storage::ResizeReserved(int64_t size)
 
 	if (state_ == STOR_STATE_SINGLE_FILE)
 	{
-		dprintf("%s %s storage: Resizing single file %d to %lld\n", tintstr(), roothashhex().c_str(), single_fd_, size);
+		dprintf("%s %s storage: Resizing single file %d to %lld\n", tintstr(), roothashhex().c_str(), single_fd_, (long long int)size);
 		return file_resize(single_fd_,size);
 	}
 	else if (state_ == STOR_STATE_INIT)
 	{
-		dprintf("%s %s storage: Postpone resize to %lld\n", tintstr(), roothashhex().c_str(), size);
+		dprintf("%s %s storage: Postpone resize to %lld\n", tintstr(), roothashhex().c_str(), (long long int)size);
 		reserved_size_ = size;
 		return 0;
 	}
@@ -555,7 +559,7 @@ int Storage::ResizeReserved(int64_t size)
 	// MULTIFILE
 	if (size > GetReservedSize())
 	{
-		dprintf("%s %s storage: Resizing multi file to %lld\n", tintstr(), roothashhex().c_str(), size);
+		dprintf("%s %s storage: Resizing multi file to %lld\n", tintstr(), roothashhex().c_str(), (long long int)size);
 
 		// Resize files to wanted size, so pread() / pwrite() works for all offsets.
 		storage_files_t::iterator iter;
@@ -568,7 +572,7 @@ int Storage::ResizeReserved(int64_t size)
 		}
 	}
 	else
-		dprintf("%s %s storage: Resize multi-file to <= %lld, ignored\n", tintstr(), roothashhex().c_str(), size);
+		dprintf("%s %s storage: Resize multi-file to <= %lld, ignored\n", tintstr(), roothashhex().c_str(), (long long int)size);
 
 	return 0;
 }

@@ -173,7 +173,7 @@ void HttpGwMayWriteCallback (int transfer) {
     	relcomplete = req->endoff+1-req->startoff;
     int64_t avail = relcomplete-(req->offset-req->startoff);
 
-    dprintf("%s @%i http write: avail %lld relcomp %llu offset %llu start %llu end %llu tosend %llu\n",tintstr(),req->id, avail, relcomplete, req->offset, req->startoff, req->endoff,  req->tosend );
+    dprintf("%s @%i http write: avail %lld relcomp %llu offset %llu start %llu end %llu tosend %llu\n",tintstr(),(int)req->id, (long long int)avail, (long long unsigned int)relcomplete, (long long unsigned int)req->offset, (long long unsigned int)req->startoff, (long long unsigned int)req->endoff,  (long long unsigned int)req->tosend );
     //fprintf(stderr,"offset %lli seqcomp %lli comp %lli\n",req->offset, complete, swift::Complete(req->transfer) );
 
 	struct evhttp_connection *evconn = evhttp_request_get_connection(req->sinkevreq);
@@ -326,7 +326,7 @@ bool HttpGwParseContentRangeHeader(http_gw_t *req,uint64_t filesize)
 		return false;
 	std::string seek = range.substr(idx+1);
 
-	dprintf("%s @%i http range request spec %s\n",tintstr(),req->id, seek.c_str() );
+	dprintf("%s @%i http range request spec %s\n",tintstr(),(int)req->id, seek.c_str() );
 
 	if (seek.find(",") != std::string::npos) {
 		// - Range header contains set, not supported at the moment
@@ -335,7 +335,7 @@ bool HttpGwParseContentRangeHeader(http_gw_t *req,uint64_t filesize)
 		// Determine first and last bytes of requested range
 		idx = seek.find("-");
 
-		dprintf("%s @%i http range request idx %d\n", tintstr(),req->id, idx );
+		dprintf("%s @%i http range request idx %d\n", tintstr(),(int)req->id, (int)idx );
 
 		if (idx == std::string::npos)
 			return false;
@@ -347,7 +347,7 @@ bool HttpGwParseContentRangeHeader(http_gw_t *req,uint64_t filesize)
 		}
 
 
-		dprintf("%s @%i http range request first %s %lld\n", tintstr(),req->id, seek.substr(0,idx).c_str(), req->rangefirst );
+		dprintf("%s @%i http range request first %s %lld\n", tintstr(),(int)req->id, seek.substr(0,idx).c_str(), (long long int)req->rangefirst );
 
 		if (idx == seek.length()-1)
 			req->rangelast = -1;
@@ -356,7 +356,7 @@ bool HttpGwParseContentRangeHeader(http_gw_t *req,uint64_t filesize)
 			std::istringstream(seek.substr(idx+1)) >> req->rangelast;
 		}
 
-		dprintf("%s @%i http range request last %s %lld\n", tintstr(),req->id, seek.substr(idx+1).c_str(), req->rangelast );
+		dprintf("%s @%i http range request last %s %lld\n", tintstr(),(int)req->id, seek.substr(idx+1).c_str(), (long long int)req->rangelast );
 
 		// Check sanity of range request
 		if (filesize == -1) {
@@ -392,7 +392,7 @@ bool HttpGwParseContentRangeHeader(http_gw_t *req,uint64_t filesize)
 
 		evhttp_send_error(req->sinkevreq,416,"Malformed range specification");
 
-		dprintf("%s @%i http invalid range %lld-%lld\n",tintstr(),req->id,req->rangefirst,req->rangelast );
+		dprintf("%s @%i http invalid range %lld-%lld\n",tintstr(),(int)req->id,(long long int)req->rangefirst,(long long int)req->rangelast );
 		return false;
 	}
 
@@ -415,7 +415,7 @@ bool HttpGwParseContentRangeHeader(http_gw_t *req,uint64_t filesize)
 	// Reply is sent when content is avail
 	req->replycode = 206;
 
-	dprintf("%s @%i http valid range %lld-%lld\n",tintstr(),req->id,req->rangefirst,req->rangelast );
+	dprintf("%s @%i http valid range %lld-%lld\n",tintstr(),(int)req->id,(long long int)req->rangefirst,(long long int)req->rangelast );
 
 	return true;
 }
@@ -543,7 +543,7 @@ void HttpGwFirstProgressCallback (int transfer, bin_t bin) {
 	evhttp_add_header(reqheaders, "Content-Length", closs.str().c_str() );
 	//evhttp_add_header(reqheaders, "Accept-Ranges", "none" );
 
-	dprintf("%s @%i headers sent, size %lli\n",tintstr(),req->id,req->tosend);
+	dprintf("%s @%i headers sent, size %lli\n",tintstr(),(int)req->id,(long long int)req->tosend);
 
 	/*
 	 * Arno, 2011-10-17: Swift ProgressCallbacks are only called when

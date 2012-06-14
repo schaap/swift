@@ -627,7 +627,7 @@ int swift::Checkpoint(int transfer) {
 // SEEK
 int swift::Seek(int fd, int64_t offset, int whence)
 {
-	dprintf("%s F%i Seek: to %lld\n",tintstr(), fd, offset );
+	dprintf("%s F%i Seek: to %lld\n",tintstr(), fd, (long long int)offset );
 
 	FileTransfer *ft = FileTransfer::file(fd);
 	if (ft == NULL)

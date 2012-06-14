@@ -151,8 +151,10 @@ int utf8main (int argc, char** argv)
             case 'w':
                 if (optarg) {
                     char unit = 'u';
-                    if (sscanf(optarg,"%lli%c",&wait_time,&unit)!=2)
+                    long long int lli_in;
+                    if (sscanf(optarg,"%lli%c",&lli_in,&unit)!=2)
                         quit("time format: 1234[umsMHD], e.g. 1M = one minute\n");
+                    wait_time = lli_in;
 
                     switch (unit) {
                         case 'D': wait_time *= 24;
@@ -520,9 +522,9 @@ void ReportCallback(int fd, short event, void *arg) {
 				"%s %lli of %lli (seq %lli) %lli dgram %lli bytes up, "	\
 				"%lli dgram %lli bytes down\n",
 				IsComplete(single_fd ) ? "DONE" : "done",
-				Complete(single_fd), Size(single_fd), SeqComplete(single_fd),
-				Channel::global_dgrams_up, Channel::global_raw_bytes_up,
-				Channel::global_dgrams_down, Channel::global_raw_bytes_down );
+				(long long int)Complete(single_fd), (long long int)Size(single_fd), (long long int)SeqComplete(single_fd),
+				(long long int)Channel::global_dgrams_up, (long long int)Channel::global_raw_bytes_up,
+				(long long int)Channel::global_dgrams_down, (long long int)Channel::global_raw_bytes_down );
 		}
 
         FileTransfer *ft = FileTransfer::file(single_fd);
@@ -656,7 +658,7 @@ int CreateMultifileSpec(std::string specfilename, int argc, char *argv[], int ar
 	char numstr[100];
 	sprintf(numstr,"%d",specsize);
 	char numstr2[100];
-	sprintf(numstr2,"%d",specsize+strlen(numstr));
+	sprintf(numstr2,"%d",(int)(specsize+strlen(numstr)));
 	if (strlen(numstr) == strlen(numstr2))
 		specsize += strlen(numstr);
 	else

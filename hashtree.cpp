@@ -78,9 +78,9 @@ std::string    Sha1Hash::hex() const {
 
 
 MmapHashTree::MmapHashTree (Storage *storage, const Sha1Hash& root_hash, uint32_t chunk_size, std::string hash_filename, bool check_hashes, std::string binmap_filename) :
-storage_(storage), root_hash_(root_hash), hashes_(NULL), peak_count_(0), hash_fd_(0),
+root_hash_(root_hash), hashes_(NULL), peak_count_(0), hash_fd_(0),
  size_(0), sizec_(0), complete_(0), completec_(0),
-chunk_size_(chunk_size)
+chunk_size_(chunk_size), storage_(storage) 
 {
 	// MULTIFILE
 	storage_->SetHashTree(this);
@@ -285,9 +285,9 @@ int MmapHashTree::serialize(FILE *fp)
 {
 	fprintf_retiffail(fp,"version %i\n", 1 );
 	fprintf_retiffail(fp,"root hash %s\n", root_hash_.hex().c_str() );
-	fprintf_retiffail(fp,"chunk size %lu\n", chunk_size_ );
-	fprintf_retiffail(fp,"complete %llu\n", complete_ );
-	fprintf_retiffail(fp,"completec %llu\n", completec_ );
+	fprintf_retiffail(fp,"chunk size %lu\n", (long unsigned int)chunk_size_ );
+	fprintf_retiffail(fp,"complete %llu\n", (long long unsigned int)complete_ );
+	fprintf_retiffail(fp,"completec %llu\n", (long long unsigned int)completec_ );
 	return ack_out_.serialize(fp);
 }
 
@@ -310,12 +310,15 @@ int MmapHashTree::internal_deserialize(FILE *fp,bool contentavail) {
 	uint64_t c,cc;
 	size_t cs;
 	int version;
+    long long unsigned int llu_in;
 
 	fscanf_retiffail(fp,"version %i\n", &version );
 	fscanf_retiffail(fp,"root hash %s\n", hexhashstr);
 	fscanf_retiffail(fp,"chunk size %lu\n", &cs);
-	fscanf_retiffail(fp,"complete %llu\n", &c );
-	fscanf_retiffail(fp,"completec %llu\n", &cc );
+	fscanf_retiffail(fp,"complete %llu\n", &llu_in );
+    c = llu_in;
+	fscanf_retiffail(fp,"completec %llu\n", &llu_in );
+    cc = llu_in;
 
 	if (ack_out_.deserialize(fp) < 0)
 		return -1;
