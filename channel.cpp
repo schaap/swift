@@ -40,6 +40,7 @@ FILE* Channel::debug_file = NULL;
 #include "ext/simple_selector.cpp"
 PeerSelector* Channel::peer_selector = new SimpleSelector();
 tint Channel::MIN_PEX_REQUEST_INTERVAL = TINT_SEC;
+std::vector<Channel::PeerListItem> Channel::knownPeers_(32);
 
 
 /*
@@ -54,9 +55,9 @@ Channel::Channel    (FileTransfer* transfer, int socket, Address peer_addr) :
     data_out_cap_(bin_t::ALL),hint_out_size_(0),
     // Gertjan fix 996e21e8abfc7d88db3f3f8158f2a2c4fc8a8d3f
     // "Changed PEX rate limiting to per channel limiting"
+    pex_requested_(false),  // Ric: init var that wasn't initialiazed
     last_pex_request_time_(0), next_pex_request_time_(0),
     pex_request_outstanding_(false), useless_pex_count_(0),
-    pex_requested_(false),  // Ric: init var that wasn't initialiazed
     //
     rtt_avg_(TINT_SEC), dev_avg_(0), dip_avg_(TINT_SEC),
     last_send_time_(0), last_recv_time_(0), last_data_out_time_(0), last_data_in_time_(0),
@@ -375,6 +376,63 @@ uint32_t Address::LOCALHOST = INADDR_LOOPBACK;
 
 
 /*
+ * Peer list management
+ */
+
+Channel::PeerReference* Channel::AddKnownPeer( const Address& adr ) {
+    int loc;
+    int oldloc = -1;
+    tint ts = usec_time();
+    for( loc = 0; loc < knownPeers_.size(); loc++ ) {
+        if( *(knownPeers_[loc].peer) == adr )
+            return new Channel::PeerReference( loc, knownPeers_[loc].timestamp );
+        if( knownPeers_[loc].timestamp < ts ) {
+            ts = knownPeers_[loc].timestamp;
+            oldloc = loc;
+        }
+    }
+    if( knownPeers_.size() >= MAX_SIZE_PEER_LIST ) {
+        ts = usec_time();
+        knownPeers_[oldloc].timestamp = ts;
+        knownPeers_[oldloc].peer = new Address(adr);
+        return new Channel::PeerReference( oldloc, ts );
+    }
+    else {
+        loc = knownPeers_.size();
+        struct PeerListItem pli( adr );
+        knownPeers_.push_back( pli );
+        return new Channel::PeerReference( loc, knownPeers_[loc].timestamp );
+    }
+}
+
+void Channel::RemoveKnownPeer( const Address& adr ) {
+    for( int loc = 0; loc < knownPeers_.size(); loc++ ) {
+        if( *(knownPeers_[loc].peer) == adr ) {
+            knownPeers_[loc].peer = NULL;
+            return;
+        }
+    }
+}
+
+Address* Channel::LookupKnownPeer( const Channel::PeerReference& ref ) {
+    if( ref.index < knownPeers_.size() && knownPeers_[ref.index].timestamp == ref.timestamp )
+        return knownPeers_[ref.index].peer;
+    return NULL;
+}
+
+Channel::PeerReference* Channel::LookupKnownPeer( const Address& adr ) {
+    for( int loc = 0; loc < knownPeers_.size(); loc++ ) {
+        if( *(knownPeers_[loc].peer) == adr )
+            return new Channel::PeerReference( loc, knownPeers_[loc].timestamp );
+    }
+    return NULL;
+}
+
+
+
+
+/*
+
  * Utility methods 1
  */
 

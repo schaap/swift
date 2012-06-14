@@ -506,7 +506,37 @@ namespace swift {
 	    /** the current time */
 	    static tint Time();
 
-	    // Arno: Per instance methods
+        /** Management methods for the global peer list. **/
+        // The address of the peer and the timestamp it was added to the list of all peers.
+        class PeerListItem {
+        public:
+            PeerListItem() : peer(NULL), timestamp(0) {}
+            PeerListItem( const PeerListItem& pli ) : peer(pli.peer), timestamp(pli.timestamp) {}
+            PeerListItem( const Address& adr ) : peer(new Address(adr)), timestamp(usec_time()) {}
+        protected:
+            Address* peer;
+            tint timestamp;
+            friend class Channel;
+        };
+        // A reference to a peer, which is its index into the list and timestamp it was added.
+        class PeerReference {
+        public:
+            PeerReference( int index_, tint timestamp_ ) : index(index_), timestamp(timestamp_) {}
+        protected:
+            int index;
+            tint timestamp;
+            friend class Channel;
+        };
+        // Returned PeerReference is to be deleted by caller
+        static PeerReference* AddKnownPeer( const Address& adr );
+        static void RemoveKnownPeer( const Address& adr );
+        // Might very well return NULL, so check that
+        static Address* LookupKnownPeer( const PeerReference& ref );
+        // May return NULL, check that; returned PeerReference is to be deleted by caller
+        static PeerReference* LookupKnownPeer( const Address& adr );
+
+
+        // Arno: Per instance methods
         void        Recv (struct evbuffer *evb);
         void        Send ();  // Called by LibeventSendCallback
         void        Close ();
@@ -602,6 +632,9 @@ namespace swift {
    	    static int sock_count;
 	    static sckrwecb_t sock_open[DGRAM_MAX_SOCK_OPEN];
 
+#define MAX_SIZE_PEER_LIST 16384
+        /** The list of all known peers. **/
+        static std::vector<PeerListItem> knownPeers_;
 
         /** Channel id: index in the channel array. */
         uint32_t    id_;
