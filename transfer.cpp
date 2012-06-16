@@ -404,4 +404,6 @@ uint32_t	FileTransfer::GetNumSeeders()
 void FileTransfer::AddPeer(Address &peer)
 {
 	Channel *c = new Channel(this,INVALID_SOCKET,peer);
+    Channel::PeerReference* ref = Channel::AddKnownPeer(peer);
+    delete ref; // TODO
 }

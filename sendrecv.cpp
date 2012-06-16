@@ -1067,6 +1067,7 @@ void    Channel::RecvDatagram (evutil_socket_t socket) {
  * Channel instance methods
  */
 
+// SCHAAP: Shouldn't this method close *all* channels of that address? Unreachable is unreachable, right...
 void Channel::CloseChannelByAddress(const Address &addr)
 {
 	// fprintf(stderr,"CloseChannelByAddress: address is %s\n", addr.str() );

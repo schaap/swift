@@ -735,7 +735,8 @@ namespace swift {
         void 		UpdateDIP(bin_t pos); // RETRANSMIT
 
 
-        static PeerSelector* peer_selector;
+        // SCHAAP: 2012-06-15 - Removed unused peer_selector to prevent confusion
+        // static PeerSelector* peer_selector;
 
         static tint     last_tick;
         //static tbheap   send_queue;

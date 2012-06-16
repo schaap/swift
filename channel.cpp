@@ -38,7 +38,8 @@ Address Channel::tracker;
 //tbheap Channel::send_queue;
 FILE* Channel::debug_file = NULL;
 #include "ext/simple_selector.cpp"
-PeerSelector* Channel::peer_selector = new SimpleSelector();
+// SCHAAP: 2012-06-15 - Removed unused peer_selector to prevent confusion
+// PeerSelector* Channel::peer_selector = new SimpleSelector();
 tint Channel::MIN_PEX_REQUEST_INTERVAL = TINT_SEC;
 std::vector<Channel::PeerListItem> Channel::knownPeers_(32);
 
@@ -259,6 +260,7 @@ int Channel::SendTo (evutil_socket_t sock, const Address& addr, struct evbuffer 
     int length = evbuffer_get_length(evb);
     int r = sendto(sock,(const char *)evbuffer_pullup(evb, length),length,0,
                    (struct sockaddr*)&(addr.addr),sizeof(struct sockaddr_in));
+    // SCHAAP: 2012-06-16 - How about EAGAIN and EWOULDBLOCK? Do we just drop the packet then as well?
     if (r<0) {
         print_error("can't send");
         evbuffer_drain(evb, length); // Arno: behaviour is to pretend the packet got lost
@@ -521,7 +523,9 @@ void    swift::Close (int fd) {
 
 
 void    swift::AddPeer (Address address, const Sha1Hash& root) {
-    Channel::peer_selector->AddPeer(address,root);
+    // SCHAAP: 2012-06-15 - Removed unused peer_selector to prevent confusion
+    // Channel::peer_selector->AddPeer(address,root);
+    FileTransfer::Find(root)->AddPeer(address);
 }
 
 
