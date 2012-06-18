@@ -1,7 +1,6 @@
 #include <string.h>
 #include <time.h>
 #include "swift.h"
-#include "swarmmanager.h"
 
 #define SECONDS_UNTIL_INDEX_REUSE   120
 #define SECONDS_UNUSED_UNTIL_SWARM_MAY_BE_DEACTIVATED   30
@@ -9,57 +8,188 @@
 namespace swift {
 
 // FIXME: Difference between seeds (complete) and downloads; allow setting minimum number of seeds?
+//          -> Currently not supported, but the basis is there.
+//          -> Also needs mechanisms to automatically decide to swap swarms back in, such as a timed check on progress.
 // FIXME: Build and run assert methods (switch on/off by define)
 
 SwarmManager SwarmManager::instance_;
 
-SwarmData::SwarmData( const Sha1Hash& rootHash ) : id_(-1), rootHash_( rootHash ), active_( false ), latestUse_(0), toBeRemoved_(false) {}
+SwarmData::SwarmData( const std::string filename, const Sha1Hash& rootHash, const Address& tracker, bool check_hashes, uint32_t chunk_size, bool zerostate ) :
+    id_(-1), rootHash_( rootHash ), active_( false ), latestUse_(0), toBeRemoved_(false), stateToBeRemoved_(false), contentToBeRemoved_(false), ft_(NULL),
+    filename_( filename ), tracker_( tracker ), checkHashes_( check_hashes ), chunkSize_( chunk_size ), zerostate_( zerostate ), cached_(false)
+{
+}
 
-SwarmData::SwarmData( const SwarmData& sd ) : id_(-1), rootHash_( sd.rootHash_ ), active_( false ), latestUse_(0), toBeRemoved_(false) {}
+SwarmData::SwarmData( const SwarmData& sd ) :
+    id_(-1), rootHash_( sd.rootHash_ ), active_( false ), latestUse_(0), toBeRemoved_(false), stateToBeRemoved_(false), contentToBeRemoved_(false), ft_(NULL),
+    filename_( sd.filename_ ), tracker_( sd.tracker_ ), checkHashes_( sd.checkHashes_ ), chunkSize_( sd.chunkSize_ ), zerostate_( sd.zerostate_ ), cached_(false)
+{
+}
 
-bool SwarmData::touch() {
+SwarmData::~SwarmData() {
+    if( ft_ )
+        delete ft_;
+}
+
+bool SwarmData::Touch() {
     if( !active_ )
         return false;
     latestUse_ = usec_time();
     return true;
 }
 
-bool SwarmData::isActive() {
+bool SwarmData::IsActive() {
     return active_;
 }
 
-const Sha1Hash& SwarmData::rootHash() {
+const Sha1Hash& SwarmData::RootHash() {
     return rootHash_;
 }
 
-int SwarmData::id() {
+int SwarmData::Id() {
     return id_;
 }
 
-bool SwarmData::toBeRemoved() {
+bool SwarmData::ToBeRemoved() {
     return toBeRemoved_;
 }
 
-// FIXME: Add all class variables to the constructor
-SwarmManager::SwarmManager() : knownSwarms_( 64, std::vector<SwarmData*>() ), eventCheckToBeRemoved_(0), maxActiveSwarms_( 256 ), activeSwarmCount_( 0 ), activeSwarms_() {
+// Can return NULL
+FileTransfer* SwarmData::GetTransfer(bool touch) {
+    if( touch ) {
+        if( !Touch() )
+            return NULL;
+    }
+    else {
+        if( !IsActive() )
+            return NULL;
+    }
+    return ft_;
+}
+
+std::string& SwarmData::Filename() {
+    return filename_;
+}
+
+Address& SwarmData::Tracker() {
+    return tracker_;
+}
+
+uint32_t SwarmData::ChunkSize() {
+    return chunkSize_;
+}
+
+bool SwarmData::IsZeroState() {
+    return zerostate_;
+}
+
+void SwarmData::SetMaxSpeed(data_direction_t ddir, double speed) {
+    if( speed <= 0 )
+        return;
+    if( ft_ ) {
+        // Arno, 2012-05-25: SetMaxSpeed resets the current speed history, so
+        // be careful here.
+        if( ft_->GetMaxSpeed( ddir ) != speed )
+            ft_->SetMaxSpeed( ddir, speed );
+    }
+    else if( cached_ )
+        cachedMaxSpeeds_[ddir] = speed;
+}
+
+void SwarmData::AddProgressCallback(ProgressCallback cb, uint8_t agg) {
+    if( ft_ )
+        ft_->AddProgressCallback(cb, agg);
+    else if( cached_ )
+        cachedCallbacks_.push_back( std::pair<ProgressCallback, uint8_t>( cb, agg ) );
+}
+
+void SwarmData::RemoveProgressCallback(ProgressCallback cb) {
+    if( ft_ )
+        ft_->RemoveProgressCallback(cb);
+    else if( cached_ ) {
+        for( std::list< std::pair<ProgressCallback, uint8_t> >::iterator iter = cachedCallbacks_.begin(); iter != cachedCallbacks_.end(); iter++ ) {
+            if( (*iter).first == cb ) {
+                cachedCallbacks_.erase(iter);
+                break;
+            }
+        }
+    }
+}
+
+uint64_t SwarmData::Size() {
+    if( ft_ )
+        return ft_->hashtree()->size();
+    else if( cached_ )
+        return cachedSize_;
+    return 0;
+}
+
+bool SwarmData::IsComplete() {
+    if( ft_ )
+        return ft_->hashtree()->is_complete();
+    else if( cached_ )
+        return cachedIsComplete_;
+    return false;
+}
+
+uint64_t SwarmData::Complete() {
+    if( ft_ )
+        return ft_->hashtree()->complete();
+    else if( cached_ )
+        return cachedComplete_;
+    return 0;
+}
+
+std::string SwarmData::OSPathName() {
+    if( ft_ )
+        return ft_->GetStorage()->GetOSPathName();
+    else if( cached_ )
+        return cachedOSPathName_;
+    return std::string();
+}
+
+SwarmManager::SwarmManager() :
+    knownSwarms_( 64, std::vector<SwarmData*>() ), swarmList_(), unusedIndices_(),
+    swarmsToBeRemoved_(), eventCheckToBeRemoved_(NULL),
+    maxActiveSwarms_( 256 ), activeSwarmCount_( 0 ), activeSwarms_()
+{
     eventCheckToBeRemoved_ = evtimer_new( Channel::evbase, CheckSwarmsToBeRemovedCallback, this );
 }
 
 SwarmManager::~SwarmManager() {
+    std::list<SwarmData*> dellist;
+    for( std::vector<SwarmData*>::iterator iter = swarmList_.begin(); iter != swarmList_.end(); iter++ )
+        dellist.push_back( *iter );
+    for( std::list<SwarmData*>::iterator deliter = dellist.begin(); deliter != dellist.end(); deliter++ )
+        delete (*deliter);
     event_free( eventCheckToBeRemoved_ );
 }
 
 #define rootHashToList( rootHash ) (knownSwarms_[rootHash.bits[0]&63])
 
+SwarmData* SwarmManager::AddSwarm( const std::string filename, const Sha1Hash& hash, const Address& tracker, bool check_hashes, uint32_t chunk_size, bool zerostate ) {
+    SwarmData sd( filename, hash, tracker, check_hashes, chunk_size, zerostate );
+    return AddSwarm( sd );
+}
+
+// Can return NULL. Can also return a non-active swarm, even though it tries to activate by default.
 SwarmData* SwarmManager::AddSwarm( const SwarmData& swarm ) {
-    // FIXME: How to handle a swarm that has no rootHash yet? Refuse? Or queue and build rootHash in the meantime?
-    std::vector<SwarmData*> list = rootHashToList(swarm.rootHash_);
-    int loc = GetSwarmLocation( list, swarm.rootHash_ );
-    if( list[loc]->rootHash_ == swarm.rootHash_ ) {
+    // FIXME: Handle a swarm that has no rootHash yet in a better way: queue it and build the rootHash in the background.
+    SwarmData* newSwarm = new SwarmData( swarm );
+    if( swarm.rootHash_ == Sha1Hash::ZERO ) {
+        BuildSwarm( newSwarm );
+        if( !newSwarm->ft_ ) {
+            delete newSwarm;
+            return NULL;
+        }
+    }
+    std::vector<SwarmData*> list = rootHashToList(newSwarm->rootHash_);
+    int loc = GetSwarmLocation( list, newSwarm->rootHash_ );
+    if( list[loc]->rootHash_ == newSwarm->rootHash_ ) {
+        delete newSwarm;
         // Let's assume here that the rest of the data is, hence, also equal
         return list[loc];
     }
-    SwarmData* newSwarm = new SwarmData( swarm );
     list.push_back( NULL );
     for( int i = list.size() - 1; i > loc; i-- )
         list[i] = list[i - 1];
@@ -73,24 +203,48 @@ SwarmData* SwarmManager::AddSwarm( const SwarmData& swarm ) {
         newSwarm->id_ = swarmList_.size();
         swarmList_.push_back( newSwarm );
     }
+    if( !ActivateSwarm( newSwarm ) && newSwarm->ft_ ) {
+        delete newSwarm->ft_;
+        newSwarm->ft_ = NULL;
+    }
     return newSwarm;
 }
 
 void SwarmManager::BuildSwarm( SwarmData* swarm ) {
-    // FIXME: Add variables to the swarm data: std::string filename, bool check_hashes, uint32_t chunk_size, bool zerostate, FileTransfer* ft_
-    swarm->ft_ = new FileTransfer( swarm->filename_, swarm->rootHash_, swarm->checkHashes_, swarm->chunkSize_, swarm->zerostate_ );
-    if( !ft_ )
+    swarm->ft_ = new FileTransfer( swarm->id_, swarm->filename_, swarm->rootHash_, swarm->checkHashes_, swarm->chunkSize_, swarm->zerostate_ );
+    if( !swarm->ft_ )
         return;
-
+    if( swarm->rootHash_ == Sha1Hash::ZERO )
+        swarm->rootHash_ = swarm->ft_->root_hash();
+    if( swarm->cached_ ) {
+        swarm->cached_ = false;
+        swarm->SetMaxSpeed( DDIR_DOWNLOAD, swarm->cachedMaxSpeeds_[DDIR_DOWNLOAD] );
+        swarm->SetMaxSpeed( DDIR_UPLOAD, swarm->cachedMaxSpeeds_[DDIR_UPLOAD] );
+        for( std::list< std::pair<ProgressCallback, uint8_t> >::iterator iter = swarm->cachedCallbacks_.begin(); iter != swarm->cachedCallbacks_.end(); iter++ )
+            swarm->AddProgressCallback( (*iter).first, (*iter).second );
+        swarm->cachedStorageFilenames_.clear();
+        swarm->cachedCallbacks_.clear();
+        swarm->cachedOSPathName_ = std::string();
+    }
+    // Hashes have been checked, don't check again
+    swarm->checkHashes_ = false;
+    if( swarm->tracker_ != Address() ) {
+        // initiate tracker connections
+        // SWIFTPROC
+        swarm->ft_->SetTracker( swarm->tracker_ );
+        swarm->ft_->ConnectToTracker();
+    }
 }
 
 // Refuses to remove an active swarm, but flags it for future removal
-void SwarmManager::RemoveSwarm( const Sha1Hash& rootHash ) {
+void SwarmManager::RemoveSwarm( const Sha1Hash& rootHash, bool removeState, bool removeContent ) {
     std::vector<SwarmData*> list = rootHashToList(rootHash);
     int loc = GetSwarmLocation( list, rootHash );
     SwarmData* swarm = list[loc];
     if( swarm->active_ ) {
         swarm->toBeRemoved_ = true;
+        swarm->stateToBeRemoved_ = removeState;
+        swarm->contentToBeRemoved_ = removeContent;
         swarmsToBeRemoved_.push_back(swarm->id_);
         if( !evtimer_pending( eventCheckToBeRemoved_, NULL ) )
             evtimer_add( eventCheckToBeRemoved_, tint2tv(5*TINT_SEC) );
@@ -106,7 +260,65 @@ void SwarmManager::RemoveSwarm( const Sha1Hash& rootHash ) {
     ui.since = usec_time();
     swarmList_[ui.index] = NULL;
     unusedIndices_.push_back(ui);
+
+    //MULTIFILE
+    // Arno, 2012-05-23: Copy all filename to be deleted to a set. This info is lost after
+    // swift::Close() and we need to call Close() to let the storage layer close the open files.
+    // TODO: remove the dirs we created, if now empty.
+    std::set<std::string> delset;
+    std::string contentfilename;
+    contentfilename = swarm->OSPathName();
+
+    // Delete content + .mhash from filesystem, if desired
+    if (removeContent)
+        delset.insert(contentfilename);
+
+    if (removeState)
+    {
+        std::string mhashfilename = contentfilename + ".mhash";
+        delset.insert(mhashfilename);
+
+        // Arno, 2012-01-10: .mbinmap gots to go too.
+        std::string mbinmapfilename = contentfilename + ".mbinmap";
+        delset.insert(mbinmapfilename);
+    }
+
+    // MULTIFILE
+    bool ready;
+    if( swarm->ft_ )
+        ready = swarm->ft_->GetStorage()->IsReady();
+    else
+        ready = swarm->cachedStorageReady_;
+    if (removeContent && ready)
+    {
+        if( swarm->ft_ ) {
+            storage_files_t::iterator iter;
+            storage_files_t sfs = swarm->ft_->GetStorage()->GetStorageFiles();
+            for (iter = sfs.begin(); iter != sfs.end(); iter++) {
+                std::string cfn = ((StorageFile*)*iter)->GetOSPathName();
+                delset.insert(cfn);
+            }
+        }
+        else {
+            std::list<std::string>::iterator iter;
+            std::list<std::string> filenames = swarm->cachedStorageFilenames_;
+            for( iter = filenames.begin(); iter != filenames.end(); iter++ )
+                delset.insert( *iter );
+        }
+    }
+
     delete swarm;
+
+    std::set<std::string>::iterator iter;
+    for (iter=delset.begin(); iter!=delset.end(); iter++)
+    {
+        std::string filename = *iter;
+        int ret = remove(filename.c_str());
+        if (ret < 0)
+        {
+            print_error("Could not remove file");
+        }
+    }
 }
 
 void SwarmManager::CheckSwarmsToBeRemovedCallback(evutil_socket_t fd, short events, void* arg) {
@@ -129,7 +341,7 @@ void SwarmManager::CheckSwarmsToBeRemoved() {
                 }
             }
             it = swarmsToBeRemoved_.erase(it);
-            RemoveSwarm( swarm->rootHash_ );
+            RemoveSwarm( swarm->rootHash_, swarm->stateToBeRemoved_, swarm->contentToBeRemoved_ );
         }
         else
             it++;
@@ -162,7 +374,10 @@ SwarmData* SwarmManager::ActivateSwarm( const Sha1Hash& rootHash ) {
     SwarmData* sd = GetSwarmData( rootHash );
     if( !sd || !(sd->rootHash_ == rootHash) || sd->toBeRemoved_ )
         return NULL;
+    return ActivateSwarm( sd );
+}
 
+SwarmData* SwarmManager::ActivateSwarm( SwarmData* sd ) {
     if( sd->active_ )
         return sd;
 
@@ -173,7 +388,14 @@ SwarmData* SwarmManager::ActivateSwarm( const Sha1Hash& rootHash ) {
 
     activeSwarmCount_++;
 
-    // FIXME: Activate swarm
+    if( !sd->ft_ ) {
+        BuildSwarm( sd );
+
+        if( !sd->ft_ ) {
+            activeSwarmCount_--;
+            return NULL;
+        }
+    }
 
     sd->active_ = true;
     sd->latestUse_ = 0;
@@ -195,16 +417,40 @@ bool SwarmManager::DeactivateSwarm() {
     if( !oldest )
         return false;
 
+    // Checkpoint before deactivating
+    if( Checkpoint( oldest->id_ ) == -1 && !oldest->zerostate_ ) {
+        // Checkpoint failed and it's not due to not being needed in zerostate; better check the hashes next time
+        oldest->checkHashes_ = true;
+    }
+
     oldest->active_ = false;
     activeSwarms_[oldestloc] = activeSwarms_[activeSwarms_.size()-1];
     activeSwarms_.pop_back();
     activeSwarmCount_--;
     if( oldest->toBeRemoved_ ) {
         swarmsToBeRemoved_.remove( oldest->id_ );
-        RemoveSwarm( oldest->rootHash_ );
+        RemoveSwarm( oldest->rootHash_, oldest->stateToBeRemoved_, oldest->contentToBeRemoved_ );
     }
 
-    // FIXME: Deactivate swarm
+    if( oldest->ft_ ) {
+        oldest->cachedMaxSpeeds_[DDIR_DOWNLOAD] = oldest->ft_->GetMaxSpeed(DDIR_DOWNLOAD);
+        oldest->cachedMaxSpeeds_[DDIR_UPLOAD] = oldest->ft_->GetMaxSpeed(DDIR_UPLOAD);
+        oldest->cachedStorageReady_ = oldest->ft_->GetStorage()->IsReady();
+        if( oldest->cachedStorageReady_ ) {
+            storage_files_t sfs = oldest->ft_->GetStorage()->GetStorageFiles();
+            for( storage_files_t::iterator iter = sfs.begin(); iter != sfs.end(); iter++)
+                oldest->cachedStorageFilenames_.push_back( ((StorageFile*)*iter)->GetOSPathName() ); 
+        }
+        oldest->cachedSize_ = oldest->Size();
+        oldest->cachedIsComplete_ = oldest->IsComplete();
+        oldest->cachedComplete_ = oldest->Complete();
+        oldest->cachedOSPathName_ = oldest->OSPathName();
+        for( std::list< std::pair<ProgressCallback, uint8_t> >::iterator iter = oldest->ft_->callbacks_.begin(); iter != oldest->ft_->callbacks_.end(); iter++ )
+            oldest->cachedCallbacks_.push_back( std::pair<ProgressCallback, uint8_t>( (*iter).first, (*iter).second ) );
+        oldest->cached_ = true;
+        delete oldest->ft_;
+        oldest->ft_ = NULL;
+    }
 
     return true;
 }
@@ -250,6 +496,47 @@ int SwarmManager::GetSwarmLocation( const std::vector<SwarmData*>& list, const S
             return mid;
     }
     return low;
+}
+
+SwarmManager& SwarmManager::GetManager() {
+    return instance_;
+}
+
+SwarmManager::Iterator::Iterator() {
+    transfer_ = -1;
+    (void)operator++();
+}
+SwarmManager::Iterator::Iterator(int transfer) : transfer_(transfer) {}
+SwarmManager::Iterator::Iterator(const Iterator& other) : transfer_(other.transfer_) {}
+SwarmManager::Iterator& SwarmManager::Iterator::operator++() {
+    transfer_++;
+    for( ; transfer_ < SwarmManager::GetManager().swarmList_.size(); transfer_++ ) {
+        if( SwarmManager::GetManager().swarmList_[transfer_] )
+            break;
+    }
+    return *this;
+}
+SwarmManager::Iterator SwarmManager::Iterator::operator++(int) {
+    SwarmManager::Iterator tmp(*this);
+    (void)operator++();
+    return tmp;
+}
+bool SwarmManager::Iterator::operator==(const SwarmManager::Iterator& other) {
+    return transfer_ == other.transfer_;
+}
+bool SwarmManager::Iterator::operator!=(const SwarmManager::Iterator& other) {
+    return transfer_ != other.transfer_;
+}
+SwarmData* SwarmManager::Iterator::operator*() {
+    if( transfer_ < SwarmManager::GetManager().swarmList_.size() )
+        return SwarmManager::GetManager().swarmList_[transfer_];
+    return NULL;
+}
+SwarmManager::Iterator SwarmManager::begin() {
+    return SwarmManager::Iterator();
+}
+SwarmManager::Iterator SwarmManager::end() {
+    return SwarmManager::Iterator( swarmList_.size() );
 }
 
 }

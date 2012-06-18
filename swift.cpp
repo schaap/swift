@@ -42,7 +42,7 @@ void CmdGwUpdateDLStatesCallback();
 
 // Global variables
 struct event evreport, evrescan, evend;
-int single_fd = -1;
+int single_transfer = -1;
 bool file_enable_checkpoint = false;
 bool file_checkpointed = false;
 bool report_progress = false;
@@ -332,7 +332,7 @@ int utf8main (int argc, char** argv)
     }
 
     // Arno, 2012-01-04: Allow download and quit mode
-    if (single_fd != -1 && root_hash != Sha1Hash::ZERO && wait_time == 0) {
+    if (single_transfer != -1 && root_hash != Sha1Hash::ZERO && wait_time == 0) {
     	wait_time = TINT_NEVER;
     	exitoncomplete = true;
     }
@@ -365,10 +365,11 @@ int utf8main (int argc, char** argv)
     }
 
     // Arno, 2012-01-03: Close all transfers
-	for (int i=0; i<FileTransfer::files.size(); i++) {
-		if (FileTransfer::files[i] != NULL)
-            Close(FileTransfer::files[i]->fd());
-    }
+    std::list<Sha1Hash> delset;
+    for( SwarmManager::Iterator it = SwarmManager::GetManager().begin(); it != SwarmManager::GetManager().end(); it++ )
+        delset.push_back( (*it)->RootHash() );
+    for( std::list<Sha1Hash>::iterator delit = delset.begin(); delit != delset.end(); delit++ )
+        SwarmManager::GetManager().RemoveSwarm( *delit );
 
     if (Channel::debug_file)
         fclose(Channel::debug_file);
@@ -384,8 +385,8 @@ int HandleSwiftFile(std::string filename, Sha1Hash root_hash, std::string tracke
 	if (root_hash!=Sha1Hash::ZERO && filename == "")
 		filename = strdup(root_hash.hex().c_str());
 
-	single_fd = OpenSwiftFile(filename,root_hash,Address(),false,chunk_size);
-	if (single_fd < 0)
+	single_transfer = OpenSwiftFile(filename,root_hash,Address(),false,chunk_size);
+	if (single_transfer < 0)
 		quit("cannot open file %s",filename.c_str());
 	if (printurl) {
 
@@ -393,32 +394,36 @@ int HandleSwiftFile(std::string filename, Sha1Hash root_hash, std::string tracke
 		if (urlfilename != "")
 			fp = fopen(urlfilename.c_str(),"wb");
 
-		if (swift::Complete(single_fd) == 0)
+		if (swift::Complete(single_transfer) == 0)
 			quit("cannot open empty file %s",filename.c_str());
 		if (chunk_size == SWIFT_DEFAULT_CHUNK_SIZE)
-			fprintf(fp,"tswift://%s/%s\n", trackerargstr.c_str(), RootMerkleHash(single_fd).hex().c_str());
+			fprintf(fp,"tswift://%s/%s\n", trackerargstr.c_str(), RootMerkleHash(single_transfer).hex().c_str());
 		else
-			fprintf(fp,"tswift://%s/%s$%i\n", trackerargstr.c_str(), RootMerkleHash(single_fd).hex().c_str(), chunk_size);
+			fprintf(fp,"tswift://%s/%s$%i\n", trackerargstr.c_str(), RootMerkleHash(single_transfer).hex().c_str(), chunk_size);
 
 		if (urlfilename != "")
 			fclose(fp);
 
 		// Arno, 2012-01-04: LivingLab: Create checkpoint such that content
 		// can be copied to scanned dir and quickly loaded
-		swift::Checkpoint(single_fd);
+		swift::Checkpoint(single_transfer);
 	}
 	else
 	{
-		printf("Root hash: %s\n", RootMerkleHash(single_fd).hex().c_str());
+		printf("Root hash: %s\n", RootMerkleHash(single_transfer).hex().c_str());
 		fflush(stdout); // For testing
 	}
 
 	// RATELIMIT
-	FileTransfer *ft = FileTransfer::file(single_fd);
-	ft->SetMaxSpeed(DDIR_DOWNLOAD,maxspeed[DDIR_DOWNLOAD]);
-	ft->SetMaxSpeed(DDIR_UPLOAD,maxspeed[DDIR_UPLOAD]);
+    SwarmData* swarm = SwarmManager::GetManager().FindSwarm( single_transfer );
+    if( !swarm ) {
+        // ???
+        return single_transfer;
+    }
+	swarm->SetMaxSpeed(DDIR_DOWNLOAD,maxspeed[DDIR_DOWNLOAD]);
+	swarm->SetMaxSpeed(DDIR_UPLOAD,maxspeed[DDIR_UPLOAD]);
 
-	return single_fd;
+	return single_transfer;
 }
 
 
@@ -433,17 +438,17 @@ int OpenSwiftFile(std::string filename, const Sha1Hash& hash, Address tracker, b
 
 	//	fprintf(stderr,"swift: parsedir: File %s may have hash %s\n", filename, ht->root_hash().hex().c_str() );
 
-	int fd = swift::Find(ht->root_hash());
+	int transfer = swift::Find(ht->root_hash());
 	delete ht;
-	if (fd == -1) {
+	if (transfer == -1) {
 		if (!quiet)
 			fprintf(stderr,"swift: parsedir: Opening %s\n", filename.c_str());
 
-		fd = swift::Open(filename,hash,tracker,check_hashes,chunk_size);
+		transfer = swift::Open(filename,hash,tracker,check_hashes,chunk_size);
 	}
 	else if (!quiet)
 		fprintf(stderr,"swift: parsedir: Ignoring loaded %s\n", filename.c_str() );
-	return fd;
+	return transfer;
 }
 
 
@@ -461,9 +466,9 @@ int OpenSwiftDirectory(std::string dirname, Address tracker, bool check_hashes, 
 			std::string path = dirname;
 			path.append(FILE_SEP);
 			path.append(de->filename_);
-			int fd = OpenSwiftFile(path,Sha1Hash::ZERO,tracker,check_hashes,chunk_size);
-			if (fd >= 0)
-				Checkpoint(fd);
+			int transfer = OpenSwiftFile(path,Sha1Hash::ZERO,tracker,check_hashes,chunk_size);
+			if (transfer >= 0)
+				Checkpoint(transfer);
 		}
 
 		DirEntry *newde = readdir_utf8(de);
@@ -480,27 +485,22 @@ int OpenSwiftDirectory(std::string dirname, Address tracker, bool check_hashes, 
 int CleanSwiftDirectory(std::string dirname)
 {
 	std::set<int>	delset;
-	std::vector<FileTransfer*>::iterator iter;
-	for (iter=FileTransfer::files.begin(); iter!=FileTransfer::files.end(); iter++)
-	{
-		FileTransfer *ft = *iter;
-		if (ft != NULL) {
-			std::string filename = ft->GetStorage()->GetOSPathName();
-			fprintf(stderr,"swift: clean: Checking %s\n", filename.c_str() );
-			int res = file_exists_utf8( filename );
-			if (res == 0) {
-				fprintf(stderr,"swift: clean: Missing %s\n", filename.c_str() );
-				delset.insert(ft->fd());
-			}
+    for( SwarmManager::Iterator iter = SwarmManager::GetManager().begin(); iter != SwarmManager::GetManager().end(); iter++ ) {
+        std::string filename = (*iter)->OSPathName();
+        fprintf(stderr,"swift: clean: Checking %s\n", filename.c_str() );
+        int res = file_exists_utf8( filename );
+        if (res == 0) {
+            fprintf(stderr,"swift: clean: Missing %s\n", filename.c_str() );
+            delset.insert((*iter)->Id());
 		}
 	}
 
 	std::set<int>::iterator	iiter;
 	for (iiter=delset.begin(); iiter!=delset.end(); iiter++)
 	{
-		int fd = *iiter;
-		fprintf(stderr,"swift: clean: Deleting transfer %d\n", fd );
-		swift::Close(fd);
+		int transfer = *iiter;
+		fprintf(stderr,"swift: clean: Deleting transfer %d\n", transfer );
+		swift::Close(transfer);
 	}
 
 	return 1;
@@ -515,41 +515,46 @@ void ReportCallback(int fd, short event, void *arg) {
 	// Arno, 2012-05-24: Why-oh-why, update NOW
 	Channel::Time();
 
-	if (single_fd  >= 0)
+	if (single_transfer  >= 0)
 	{
 		if (report_progress) {
 			fprintf(stderr,
 				"%s %lli of %lli (seq %lli) %lli dgram %lli bytes up, "	\
 				"%lli dgram %lli bytes down\n",
-				IsComplete(single_fd ) ? "DONE" : "done",
-				(long long int)Complete(single_fd), (long long int)Size(single_fd), (long long int)SeqComplete(single_fd),
+				IsComplete(single_transfer ) ? "DONE" : "done",
+				(long long int)Complete(single_transfer), (long long int)Size(single_transfer), (long long int)SeqComplete(single_transfer),
 				(long long int)Channel::global_dgrams_up, (long long int)Channel::global_raw_bytes_up,
 				(long long int)Channel::global_dgrams_down, (long long int)Channel::global_raw_bytes_down );
 		}
 
-        FileTransfer *ft = FileTransfer::file(single_fd);
-        if (report_progress) { // TODO: move up
-        	fprintf(stderr,"upload %lf\n",ft->GetCurrentSpeed(DDIR_UPLOAD));
-        	fprintf(stderr,"dwload %lf\n",ft->GetCurrentSpeed(DDIR_DOWNLOAD));
+        SwarmData* swarm = SwarmManager::GetManager().FindSwarm(single_transfer);
+        if( swarm ) {
+            FileTransfer* ft = swarm->GetTransfer(false);
+            if (report_progress) { // TODO: move up
+                fprintf(stderr,"upload %lf\n",(ft?ft->GetCurrentSpeed(DDIR_UPLOAD):0.0));
+                fprintf(stderr,"dwload %lf\n",(ft?ft->GetCurrentSpeed(DDIR_DOWNLOAD):0.0));
+            }
+            // Update speed measurements such that they decrease when DL/UL stops
+            // Always
+            if( ft ) {
+                ft->OnRecvData(0);
+                ft->OnSendData(0);
+
+                // CHECKPOINT
+                if (file_enable_checkpoint && !file_checkpointed && IsComplete(single_transfer))
+                {
+                    std::string binmap_filename = ft->GetStorage()->GetOSPathName();
+                    binmap_filename.append(".mbinmap");
+                    fprintf(stderr,"swift: Complete, checkpointing %s\n", binmap_filename.c_str() );
+
+                    if (swift::Checkpoint(single_transfer) >= 0)
+                        file_checkpointed = true;
+                }
+            }
         }
-        // Update speed measurements such that they decrease when DL/UL stops
-        // Always
-    	ft->OnRecvData(0);
-    	ft->OnSendData(0);
-
-    	// CHECKPOINT
-    	if (file_enable_checkpoint && !file_checkpointed && IsComplete(single_fd))
-    	{
-    		std::string binmap_filename = ft->GetStorage()->GetOSPathName();
-    		binmap_filename.append(".mbinmap");
-    		fprintf(stderr,"swift: Complete, checkpointing %s\n", binmap_filename.c_str() );
-
-    		if (swift::Checkpoint(single_fd) >= 0)
-    			file_checkpointed = true;
-    	}
 
 
-    	if (exitoncomplete && IsComplete(single_fd))
+    	if (exitoncomplete && IsComplete(single_transfer))
     		// Download and stop mode
     	    event_base_loopexit(Channel::evbase, NULL);
 

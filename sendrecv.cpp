@@ -641,9 +641,7 @@ bin_t Channel::OnData (struct evbuffer *evb) {  // TODO: HAVE NONE for corrupted
     	fprintf(stderr,"$ ");
 
     bin_t cover = transfer().ack_out()->cover(pos);
-    for(int i=0; i<transfer().cb_installed; i++)
-        if (cover.layer()>=transfer().cb_agg[i])
-            transfer().callbacks[i](transfer().fd(),cover);  // FIXME
+    transfer().Progress(cover);
     if (cover.layer() >= 5) // Arno: tested with 32K, presently = 2 ** 5 * chunk_size CHUNKSIZE
     	transfer().OnRecvData( pow((double)2,(double)5)*((double)hashtree()->chunk_size()) );
     data_in_.bin = pos;
@@ -990,15 +988,27 @@ void    Channel::RecvDatagram (evutil_socket_t socket) {
         if (!pos.is_all())
             return_log ("%s #0 that is not the root hash %s\n",tintstr(),addr.str());
         hash = evbuffer_remove_hash(evb);
-        FileTransfer* ft = FileTransfer::Find(hash);
-        if (!ft)
-        {
-        	ZeroState *zs = ZeroState::GetInstance();
-        	ft = zs->Find(hash);
-        	if (!ft)
-            	return_log ("%s #0 hash %s unknown, requested by %s\n",tintstr(),hash.hex().c_str(),addr.str());
+        SwarmData* swarm = SwarmManager::GetManager().FindSwarm(hash);
+        FileTransfer* ft = NULL;
+        if( !swarm ) {
+            ZeroState *zs = ZeroState::GetInstance();
+            int transfer = zs->Find(hash);
+            if( transfer == -1 )
+                return_log ("%s #0 hash %s unknown, requested by %s\n",tintstr(),hash.hex().c_str(),addr.str());
+            swarm = SwarmManager::GetManager().FindSwarm( transfer );
+            if( !swarm )
+                return_log( "%s #0 hash %s created by zero state, but not found?; requested by %s\n", tintstr(), hash.hex().c_str(), addr.str() );
         }
-		else if (ft->IsZeroState() && !ft->hashtree()->is_complete())
+        ft = swarm->GetTransfer();
+        if( !ft ) {
+            swarm = SwarmManager::GetManager().ActivateSwarm( hash );
+            if( !swarm )
+                return_log( "%s #0 hash %s known, but can't be activated; requested by %s\n", tintstr(), hash.hex().c_str(), addr.str() );
+            ft = swarm->GetTransfer();
+            if( !ft )
+                return_log( "%s #0 hash %s known, but can't be activated; requested by %s\n", tintstr(), hash.hex().c_str(), addr.str() );
+        }
+		if (swarm->IsZeroState() && !ft->hashtree()->is_complete())
 		{
 			return_log ("%s #0 zero hash %s broken, requested by %s\n",tintstr(),hash.hex().c_str(),addr.str());
 		}

@@ -76,15 +76,14 @@ http_gw_t *HttpGwFindRequestByTransfer(int transfer) {
 }
 
 http_gw_t *HttpGwFindRequestByRoothash(Sha1Hash &wanthash) {
+    SwarmData* swarm = SwarmManager::GetManager().FindSwarm( wanthash );
+    if( !swarm )
+        return NULL;
+    int id = swarm->Id();
 	for (int httpc=0; httpc<http_gw_reqs_open; httpc++) {
 		http_gw_t *req = &http_requests[httpc];
-		if (req == NULL)
-			continue;
-		FileTransfer *ft = FileTransfer::file(req->transfer);
-		if (ft == NULL)
-			continue;
-		if (ft->root_hash() == wanthash)
-			return req;
+        if( req && req->transfer == id )
+            return req;
 	}
 	return NULL;
 }
@@ -441,13 +440,19 @@ void HttpGwFirstProgressCallback (int transfer, bin_t bin) {
 
 	// MULTIFILE
 	// Is storage ready?
-	FileTransfer *ft = FileTransfer::file(req->transfer);
-	if (ft == NULL) {
-		dprintf("%s T%i first: FileTransfer not found\n",tintstr(),transfer );
+    SwarmData* swarm = SwarmManager::GetManager().FindSwarm( transfer );
+    if( !swarm ) {
+   		dprintf("%s T%i first: SwarmData not found\n",tintstr(),transfer );
     	evhttp_send_error(req->sinkevreq,500,"Internal error: Content not found although downloading it.");
     	return;
 	}
-	if (!ft->GetStorage()->IsReady())
+	FileTransfer *ft = swarm->GetTransfer();
+	if( !ft ) {
+        swarm = SwarmManager::GetManager().ActivateSwarm( swarm->RootHash() );
+        if( swarm )
+            ft = swarm->GetTransfer();
+    }
+	if( !ft || !ft->GetStorage()->IsReady() )
 	{
 		dprintf("%s T%i first: Storage not ready\n",tintstr(),transfer );
 		return; // wait for some more data
@@ -711,9 +716,11 @@ void HttpGwNewRequestCallback (struct evhttp_request *evreq, void *arg) {
 
         // Arno, 2011-12-20: Only on new transfers, otherwise assume that CMD GW
         // controls speed
-        FileTransfer *ft = FileTransfer::file(transfer);
-        ft->SetMaxSpeed(DDIR_DOWNLOAD,httpgw_maxspeed[DDIR_DOWNLOAD]);
-        ft->SetMaxSpeed(DDIR_UPLOAD,httpgw_maxspeed[DDIR_UPLOAD]);
+        SwarmData* swarm = SwarmManager::GetManager().FindSwarm( transfer );
+        if( swarm ) {
+            swarm->SetMaxSpeed(DDIR_DOWNLOAD,httpgw_maxspeed[DDIR_DOWNLOAD]);
+            swarm->SetMaxSpeed(DDIR_UPLOAD,httpgw_maxspeed[DDIR_UPLOAD]);
+        }
     }
 
     // 5. Record request
@@ -793,12 +800,15 @@ bool HTTPIsSending()
 {
 	if (http_gw_reqs_open > 0)
 	{
-		FileTransfer *ft = FileTransfer::file(http_requests[http_gw_reqs_open-1].transfer);
-		if (ft != NULL) {
-			fprintf(stderr,"httpgw: upload %lf\n",ft->GetCurrentSpeed(DDIR_UPLOAD)/1024.0);
-			fprintf(stderr,"httpgw: dwload %lf\n",ft->GetCurrentSpeed(DDIR_DOWNLOAD)/1024.0);
-			//fprintf(stderr,"httpgw: seqcmp %llu\n", swift::SeqComplete(http_requests[http_gw_reqs_open-1].transfer));
-		}
+        SwarmData* swarm = SwarmManager::GetManager().FindSwarm( http_requests[http_gw_reqs_open-1].transfer );
+        if( swarm ) {
+            FileTransfer* ft = swarm->GetTransfer(false);
+            if( ft ) {
+                fprintf(stderr,"httpgw: upload %lf\n",ft->GetCurrentSpeed(DDIR_UPLOAD)/1024.0);
+                fprintf(stderr,"httpgw: dwload %lf\n",ft->GetCurrentSpeed(DDIR_DOWNLOAD)/1024.0);
+                //fprintf(stderr,"httpgw: seqcmp %llu\n", swift::SeqComplete(http_requests[http_gw_reqs_open-1].transfer));
+            }
+        }
 	}
     return true;
 

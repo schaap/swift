@@ -13,15 +13,49 @@ namespace swift {
         bool active_;
         tint latestUse_;
         bool toBeRemoved_;
+        bool stateToBeRemoved_;
+        bool contentToBeRemoved_;
+        FileTransfer* ft_;
+        std::string filename_;
+        Address tracker_;
+        bool checkHashes_;
+        uint32_t chunkSize_;
+        bool zerostate_;
+        double cachedMaxSpeeds_[2];
+        bool cachedStorageReady_;
+        std::list<std::string> cachedStorageFilenames_;
+        uint64_t cachedSize_;
+        bool cachedIsComplete_;
+        uint64_t cachedComplete_;
+        std::string cachedOSPathName_;
+        std::list< std::pair<ProgressCallback, uint8_t> > cachedCallbacks_;
+        bool cached_;
     public:
-        SwarmData( const Sha1Hash& rootHash );
+        SwarmData( const std::string filename, const Sha1Hash& rootHash, const Address& tracker, bool check_hashes, uint32_t chunk_size, bool zerostate );
         SwarmData( const SwarmData& sd );
 
-        bool touch();
-        bool isActive();
-        const Sha1Hash& rootHash();
-        int id();
-        bool toBeRemoved();
+        ~SwarmData();
+
+        bool Touch();
+        bool IsActive();
+        const Sha1Hash& RootHash();
+        int Id();
+        bool ToBeRemoved();
+        FileTransfer* GetTransfer(bool touch = true);
+        std::string& Filename();
+        Address& Tracker();
+        uint32_t ChunkSize();
+        bool IsZeroState();
+
+        // Find out cached values of non-active swarms
+        uint64_t Size();
+        bool IsComplete();
+        uint64_t Complete();
+        std::string OSPathName();
+
+        void SetMaxSpeed(data_direction_t ddir, double speed);
+        void AddProgressCallback(ProgressCallback cb, uint8_t agg);
+        void RemoveProgressCallback(ProgressCallback cb);
 
         friend class SwarmManager;
     };
@@ -59,6 +93,9 @@ namespace swift {
         int GetSwarmLocation( const std::vector<SwarmData*>& list, const Sha1Hash& rootHash );
         SwarmData* GetSwarmData( const Sha1Hash& rootHash );
 
+        // Internal activation method
+        SwarmData* ActivateSwarm( SwarmData* swarm );
+
         // Internal method to find the oldest swarm and deactivate it
         bool DeactivateSwarm();
 
@@ -71,8 +108,9 @@ namespace swift {
         static SwarmManager& GetManager();
 
         // Add and remove swarms
+        SwarmData* AddSwarm( const std::string filename, const Sha1Hash& hash, const Address& tracker, bool check_hashes, uint32_t chunk_size, bool zerostate );
         SwarmData* AddSwarm( const SwarmData& swarm );
-        void RemoveSwarm( const Sha1Hash& rootHash );
+        void RemoveSwarm( const Sha1Hash& rootHash, bool removeState = false, bool removeContent = false );
 
         // Find a swam, either by id or root hash
         SwarmData* FindSwarm( int id );
@@ -85,5 +123,22 @@ namespace swift {
         // Manage maximum of active swarms
         int GetMaximumActiveSwarms();
         void SetMaximumActiveSwarms( int newMaxActiveSwarms );
+
+        class Iterator : public std::iterator<std::input_iterator_tag, SwarmData*> {
+        protected:
+            int transfer_;
+        public:
+            Iterator();
+            Iterator(int transfer);
+            Iterator(const Iterator& other);
+            Iterator& operator++();
+            Iterator operator++(int);
+            bool operator==(const Iterator& other);
+            bool operator!=(const Iterator& other);
+            SwarmData* operator*();
+        };
+        friend class Iterator;
+        Iterator begin();
+        Iterator end();
     };
 }

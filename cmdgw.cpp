@@ -149,13 +149,14 @@ cmd_gw_t* CmdGwFindRequestByTransfer (int transfer)
 
 cmd_gw_t* CmdGwFindRequestByRootHash(Sha1Hash &want_hash)
 {
-	FileTransfer *ft = NULL;
+    SwarmData* swarm = SwarmManager::GetManager().FindSwarm( want_hash );
+    if( !swarm )
+        return NULL;
+    int id = swarm->Id();
     for(int i=0; i<cmd_gw_reqs_open; i++) {
     	cmd_gw_t* req = &cmd_requests[i];
-    	ft = FileTransfer::file(req->transfer);
-    	Sha1Hash got_hash = ft->root_hash();
-        if (want_hash == got_hash)
-        	return req;
+        if( req->transfer == id )
+            return req;
     }
     return NULL;
 }
@@ -183,63 +184,10 @@ void CmdGwGotREMOVE(Sha1Hash &want_hash, bool removestate, bool removecontent)
 	cmd_gw_t* req = CmdGwFindRequestByRootHash(want_hash);
 	if (req == NULL)
     	return;
-    FileTransfer *ft = FileTransfer::file(req->transfer);
-    if (ft == NULL)
-    	return;
 
 	dprintf("%s @%i remove transfer %i\n",tintstr(),req->id,req->transfer);
 
-	//MULTIFILE
-	// Arno, 2012-05-23: Copy all filename to be deleted to a set. This info is lost after
-	// swift::Close() and we need to call Close() to let the storage layer close the open files.
-    // TODO: remove the dirs we created, if now empty.
-	std::set<std::string>	delset;
-	std::string contentfilename = ft->GetStorage()->GetOSPathName();
-
-	// Delete content + .mhash from filesystem, if desired
-	if (removecontent)
-		delset.insert(contentfilename);
-
-	if (removestate)
-	{
-		std::string mhashfilename = contentfilename + ".mhash";
-		delset.insert(mhashfilename);
-
-		// Arno, 2012-01-10: .mbinmap gots to go too.
-		std::string mbinmapfilename = contentfilename + ".mbinmap";
-		delset.insert(mbinmapfilename);
-	}
-
-	// MULTIFILE
-	if (removecontent && ft->GetStorage()->IsReady())
-	{
-		storage_files_t::iterator iter;
-		storage_files_t sfs = ft->GetStorage()->GetStorageFiles();
-		for (iter = sfs.begin(); iter < sfs.end(); iter++)
-		{
-			StorageFile *sf = *iter;
-			std::string cfn = sf->GetOSPathName();
-			delset.insert(cfn);
-		}
-	}
-
-	swift::Close(req->transfer);
-	ft = NULL;
-	// All ft info now invalid
-
-	std::set<std::string>::iterator iter;
-	for (iter=delset.begin(); iter!=delset.end(); iter++)
-	{
-		std::string filename = *iter;
-		if (cmd_gw_debug)
-			fprintf(stderr,"CmdGwREMOVE: removing %s\n", filename.c_str() );
-		int ret = remove(filename.c_str());
-		if (ret < 0)
-		{
-			if (cmd_gw_debug)
-				print_error("Could not remove file");
-		}
-	}
+	swift::Close(req->transfer, removestate, removecontent);
 
 	CmdGwFreeRequest(req);
 	*req = cmd_requests[--cmd_gw_reqs_open];
@@ -254,17 +202,10 @@ void CmdGwGotMAXSPEED(Sha1Hash &want_hash, data_direction_t ddir, double speed)
 	cmd_gw_t* req = CmdGwFindRequestByRootHash(want_hash);
 	if (req == NULL)
     	return;
-    FileTransfer *ft = FileTransfer::file(req->transfer);
-
-    // Arno, 2012-05-25: SetMaxSpeed resets the current speed history, so
-    // be careful here.
-    double curmax = ft->GetMaxSpeed(ddir);
-    if (curmax != speed)
-    {
-    	if (cmd_gw_debug)
-    		fprintf(stderr,"cmd: CmdGwGotMAXSPEED: %s was %lf want %lf, setting\n", want_hash.hex().c_str(), curmax, speed );
-    	ft->SetMaxSpeed(ddir,speed);
-    }
+    SwarmData* swarm = SwarmManager::GetManager().FindSwarm( req->transfer );
+    if( !swarm )
+        return;
+    swarm->SetMaxSpeed(ddir, speed);
 }
 
 
@@ -281,11 +222,7 @@ void CmdGwGotPEERADDR(Sha1Hash &want_hash, Address &peer)
 	cmd_gw_t* req = CmdGwFindRequestByRootHash(want_hash);
 	if (req == NULL)
     	return;
-	FileTransfer *ft = FileTransfer::file(req->transfer);
-	if (ft == NULL)
-		return;
-
-	ft->AddPeer(peer);
+    swift::AddPeer(peer, want_hash);
 }
 
 
@@ -308,12 +245,14 @@ void CmdGwSendINFO(cmd_gw_t* req, int dlstatus)
 	if (cmd_gw_debug)
 		fprintf(stderr,"cmd: SendINFO: %d %d\n", req->transfer, dlstatus );
 
-	FileTransfer *ft = FileTransfer::file(req->transfer);
-	if (ft == NULL)
-		// Download was removed or closed somehow.
-		return;
+    SwarmData* swarm = SwarmManager::GetManager().FindSwarm( req->transfer );
+    if( !swarm ) {
+        // Download was removed or closed somehow.
+        return;
+    }
+    FileTransfer* ft = swarm->GetTransfer();
 
-    Sha1Hash root_hash = ft->root_hash();
+    Sha1Hash root_hash = swarm->RootHash();
 
     char cmd[MAX_CMD_MESSAGE];
     uint64_t size = swift::Size(req->transfer);
@@ -321,11 +260,20 @@ void CmdGwSendINFO(cmd_gw_t* req, int dlstatus)
     if (size == complete)
     	dlstatus = DLSTATUS_SEEDING;
 
-    uint32_t numleech = ft->GetNumLeechers();
-    uint32_t numseeds = ft->GetNumSeeders();
+    // FIXME: Are those active leechers and seeders, or potential leechers and seeders? In the latter case, get cached values when cached peers have been implemented.
+    uint32_t numleech = 0;
+    if( ft )
+        numleech = ft->GetNumLeechers();
+    uint32_t numseeds = 0;
+    if( ft )
+        numseeds = ft->GetNumSeeders();
 
-    double dlspeed = ft->GetCurrentSpeed(DDIR_DOWNLOAD);
-    double ulspeed = ft->GetCurrentSpeed(DDIR_UPLOAD);
+    double dlspeed = 0.0;
+    if( ft )
+        dlspeed = ft->GetCurrentSpeed(DDIR_DOWNLOAD);
+    double ulspeed = 0.0;
+    if( ft )
+        ulspeed = ft->GetCurrentSpeed(DDIR_UPLOAD);
     sprintf(cmd,"INFO %s %d %lli/%lli %lf %lf %u %u\r\n",root_hash.hex().c_str(),dlstatus,(long long int)complete,(long long int)size,dlspeed,ulspeed,numleech,numseeds);
 
     send(req->cmdsock,cmd,strlen(cmd),0);
@@ -338,7 +286,9 @@ void CmdGwSendINFO(cmd_gw_t* req, int dlstatus)
     	oss.setf(std::ios::fixed,std::ios::floatfield);
     	oss.precision(5);
         std::set<Channel *>::iterator iter;
-        std::set<Channel *> peerchans = ft->GetChannels();
+        std::set<Channel *> peerchans;
+        if( ft )
+            peerchans = ft->GetChannels();
 
         oss << "MOREINFO" << " " << root_hash.hex() << " ";
 
@@ -347,19 +297,19 @@ void CmdGwSendINFO(cmd_gw_t* req, int dlstatus)
         oss << "\"channels\":";
         oss << "[";
         for (iter=peerchans.begin(); iter!=peerchans.end(); iter++) {
-    		Channel *c = *iter;
-    		if (c != NULL) {
-    			if (iter!=peerchans.begin())
-    				oss << ", ";
-    			oss << "{";
-    			oss << "\"ip\": \"" << c->peer().ipv4str() << "\", ";
-    			oss << "\"port\": " << c->peer().port() << ", ";
-    			oss << "\"raw_bytes_up\": " << c->raw_bytes_up() << ", ";
-    			oss << "\"raw_bytes_down\": " << c->raw_bytes_down() << ", ";
-    			oss << "\"bytes_up\": " << c->bytes_up() << ", ";
-    			oss << "\"bytes_down\": " << c->bytes_down() << " ";
-    			oss << "}";
-    		}
+            Channel *c = *iter;
+            if (c != NULL) {
+                if (iter!=peerchans.begin())
+                    oss << ", ";
+                oss << "{";
+                oss << "\"ip\": \"" << c->peer().ipv4str() << "\", ";
+                oss << "\"port\": " << c->peer().port() << ", ";
+                oss << "\"raw_bytes_up\": " << c->raw_bytes_up() << ", ";
+                oss << "\"raw_bytes_down\": " << c->raw_bytes_down() << ", ";
+                oss << "\"bytes_up\": " << c->bytes_up() << ", ";
+                oss << "\"bytes_down\": " << c->bytes_down() << " ";
+                oss << "}";
+            }
         }
         oss << "], ";
         oss << "\"raw_bytes_up\": " << Channel::global_raw_bytes_up << ", ";
@@ -383,7 +333,10 @@ void CmdGwSendPLAY(cmd_gw_t *req)
 	if (cmd_gw_debug)
 		fprintf(stderr,"cmd: SendPLAY: %d\n", req->transfer );
 
-    Sha1Hash root_hash = FileTransfer::file(req->transfer)->root_hash();
+    SwarmData* swarm = SwarmManager::GetManager().FindSwarm( req->transfer );
+    if( !swarm )
+        return;
+    Sha1Hash root_hash = swarm->RootHash();
 
     char cmd[MAX_CMD_MESSAGE];
     // Slightly diff format: roothash as ID after CMD
@@ -475,11 +428,23 @@ void CmdGwSwiftFirstProgressCallback (int transfer, bin_t bin)
 	if (req == NULL)
 		return;
 
-	FileTransfer *ft = FileTransfer::file(req->transfer);
-	if (ft == NULL) {
-		CmdGwSendERRORBySocket(req->cmdsock,"Unknown transfer?!");
-    	return;
-	}
+    SwarmData* swarm = SwarmManager::GetManager().FindSwarm( transfer );
+    if( !swarm ) {
+   		CmdGwSendERRORBySocket(req->cmdsock,"Unknown transfer?!");
+        return;
+    }
+	FileTransfer *ft = swarm->GetTransfer();
+    if( !ft ) {
+        // We're actively waiting for a multi-file to become ready. Make it active.
+        swarm = SwarmManager::GetManager().ActivateSwarm( swarm->RootHash() );
+        if( !swarm )
+            return;
+        ft = swarm->GetTransfer();
+        if( !ft ) {
+            // We tried
+            return;
+        }
+    }
 	if (!ft->GetStorage()->IsReady()) {
 		// Wait until (multi-file) storage is ready
 		return;
@@ -566,8 +531,14 @@ void CmdGwUpdateDLStateCallback(cmd_gw_t* req)
 	// Periodic callback, tell user INFO
 	CmdGwSendINFO(req,DLSTATUS_DOWNLOADING);
 
+    SwarmData* swarm = SwarmManager::GetManager().FindSwarm( req->transfer );
+    if( !swarm )
+        return;
+    FileTransfer* ft = swarm->GetTransfer(false);
+    if( !ft )
+        return;
+
 	// Update speed measurements such that they decrease when DL/UL stops
-	FileTransfer *ft = FileTransfer::file(req->transfer);
 	ft->OnRecvData(0);
 	ft->OnSendData(0);
 
@@ -830,7 +801,8 @@ int CmdGwHandleCommand(evutil_socket_t cmdsock, char *copyline)
         }
 
         // RATELIMIT
-        //FileTransfer::file(transfer)->SetMaxSpeed(DDIR_DOWNLOAD,512*1024);
+        // SwarmData* swarm = SwarmManager::GetManager().FindSwarm(transfer);
+        // swarm->SetMaxSpeed(DDIR_DOWNLOAD,512*1024);
 
         req->transfer = transfer;
         req->startt = usec_time();
@@ -841,12 +813,21 @@ int CmdGwHandleCommand(evutil_socket_t cmdsock, char *copyline)
 
         // MULTIFILE
         int64_t minsize=CMDGW_MAX_PREBUF_BYTES;
-        FileTransfer *ft = FileTransfer::file(transfer);
-        if (ft == NULL)
-        	return ERROR_BAD_ARG;
-		storage_files_t sfs = ft->GetStorage()->GetStorageFiles();
-		if (sfs.size() > 0)
-			minsize = sfs[0]->GetSize();
+        SwarmData* swarm = SwarmManager::GetManager().FindSwarm( transfer );
+        if( !swarm )
+            return ERROR_BAD_ARG;
+        FileTransfer* ft = swarm->GetTransfer();
+        if( !ft ) {
+            swarm = SwarmManager::GetManager().ActivateSwarm( swarm->RootHash() );
+            if( swarm )
+                ft = swarm->GetTransfer();
+        }
+            
+        if( ft ) {
+            storage_files_t sfs = ft->GetStorage()->GetStorageFiles();
+            if (sfs.size() > 0)
+                minsize = sfs[0]->GetSize();
+        }
 
         // Wait for prebuffering and then send PLAY to user
         if (swift::SeqComplete(transfer) >= minsize)
@@ -859,7 +840,8 @@ int CmdGwHandleCommand(evutil_socket_t cmdsock, char *copyline)
             swift::AddProgressCallback(transfer,&CmdGwSwiftFirstProgressCallback,CMDGW_FIRST_PROGRESS_BYTE_INTERVAL_AS_LAYER);
         }
 
-        ft->GetStorage()->AddOneTimeAllocationCallback(CmdGwSwiftAllocatingDiskspaceCallback);
+        if( ft )
+            ft->GetStorage()->AddOneTimeAllocationCallback(CmdGwSwiftAllocatingDiskspaceCallback);
     }
     else if (!strcmp(method,"REMOVE"))
     {
