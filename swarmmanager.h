@@ -84,7 +84,6 @@ namespace swift {
         std::list<struct UnusedIndex> unusedIndices_;
 
         // Structures and functions for deferred removal of active swarms
-        std::list<int> swarmsToBeRemoved_;
         struct event* eventCheckToBeRemoved_;
         static void CheckSwarmsToBeRemovedCallback(evutil_socket_t fd, short events, void* arg);
         void CheckSwarmsToBeRemoved();

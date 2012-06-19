@@ -176,7 +176,7 @@ std::string SwarmData::OSPathName() {
 
 SwarmManager::SwarmManager() :
     knownSwarms_( 64, std::vector<SwarmData*>() ), swarmList_(), unusedIndices_(),
-    swarmsToBeRemoved_(), eventCheckToBeRemoved_(NULL),
+    eventCheckToBeRemoved_(NULL),
     maxActiveSwarms_( 256 ), activeSwarmCount_( 0 ), activeSwarms_()
 {
     invariant();
@@ -223,7 +223,7 @@ SwarmData* SwarmManager::AddSwarm( const SwarmData& swarm ) {
     }
     std::vector<SwarmData*> list = rootHashToList(newSwarm->rootHash_);
     int loc = GetSwarmLocation( list, newSwarm->rootHash_ );
-    if( list[loc]->rootHash_ == newSwarm->rootHash_ ) {
+    if( loc < list.size() && list[loc]->rootHash_ == newSwarm->rootHash_ ) {
         delete newSwarm;
         // Let's assume here that the rest of the data is, hence, also equal
         assert( swarm.rootHash_ != Sha1Hash::ZERO );
@@ -290,12 +290,13 @@ void SwarmManager::RemoveSwarm( const Sha1Hash& rootHash, bool removeState, bool
     assert( rootHash != Sha1Hash::ZERO );
     std::vector<SwarmData*> list = rootHashToList(rootHash);
     int loc = GetSwarmLocation( list, rootHash );
+    if( loc == list.size() )
+        return;
     SwarmData* swarm = list[loc];
     if( swarm->active_ ) {
         swarm->toBeRemoved_ = true;
         swarm->stateToBeRemoved_ = removeState;
         swarm->contentToBeRemoved_ = removeContent;
-        swarmsToBeRemoved_.push_back(swarm->id_);
         if( !evtimer_pending( eventCheckToBeRemoved_, NULL ) )
             evtimer_add( eventCheckToBeRemoved_, tint2tv(5*TINT_SEC) );
         invariant();
@@ -385,23 +386,25 @@ void SwarmManager::CheckSwarmsToBeRemoved() {
     invariant();
     // Remove swarms that are scheduled to be removed
     tint old = usec_time() - SECONDS_UNUSED_UNTIL_SWARM_MAY_BE_DEACTIVATED;
-    for( std::list<int>::iterator it = swarmsToBeRemoved_.begin(); it != swarmsToBeRemoved_.end(); ) {
-        if( swarmList_[*it]->latestUse_ < old ) {
-            SwarmData* swarm = swarmList_[*it];
-            swarm->active_ = false;
-            for( int i = 0; i < activeSwarms_.size(); i++ ) {
-                if( activeSwarms_[i] == swarm ) {
-                    activeSwarms_[i] = activeSwarms_[activeSwarms_.size()-1];
-                    activeSwarms_.pop_back();
-                    activeSwarmCount_--;
-                    break;
-                }
-            }
-            it = swarmsToBeRemoved_.erase(it);
-            RemoveSwarm( swarm->rootHash_, swarm->stateToBeRemoved_, swarm->contentToBeRemoved_ );
+    std::list<int> dellist;
+    bool hasMore = false;
+    for( int i = 0; i < activeSwarms_.size(); i++ ) {
+        assert( activeSwarms_[i] );
+        if( activeSwarms_[i]->toBeRemoved_ ) {
+            if( activeSwarms_[i]->latestUse_ < old )
+                dellist.push_back( i );
+            else
+                hasMore = true;
         }
-        else
-            it++;
+    }
+    while( dellist.size() > 0 ) {
+        int i = dellist.back();
+        SwarmData* swarm = activeSwarms_[i];
+        activeSwarms_[i] = activeSwarms_[activeSwarms_.size()-1];
+        activeSwarms_.pop_back();
+        activeSwarmCount_--;
+        dellist.pop_back();
+        RemoveSwarm( swarm->rootHash_, swarm->stateToBeRemoved_, swarm->contentToBeRemoved_ );
     }
     
     // If we have too much swarms active, aggressively try to remove swarms
@@ -409,7 +412,7 @@ void SwarmManager::CheckSwarmsToBeRemoved() {
         if( !DeactivateSwarm() )
             break;
 
-    if( swarmsToBeRemoved_.size() > 0 || activeSwarmCount_ > maxActiveSwarms_ )
+    if( hasMore || activeSwarmCount_ > maxActiveSwarms_ )
         evtimer_add( eventCheckToBeRemoved_, tint2tv(5*TINT_SEC) );
     invariant();
 }
@@ -510,10 +513,8 @@ bool SwarmManager::DeactivateSwarm() {
     activeSwarms_[oldestloc] = activeSwarms_[activeSwarms_.size()-1];
     activeSwarms_.pop_back();
     activeSwarmCount_--;
-    if( oldest->toBeRemoved_ ) {
-        swarmsToBeRemoved_.remove( oldest->id_ );
+    if( oldest->toBeRemoved_ )
         RemoveSwarm( oldest->rootHash_, oldest->stateToBeRemoved_, oldest->contentToBeRemoved_ );
-    }
 
     if( oldest->ft_ ) {
         oldest->cachedMaxSpeeds_[DDIR_DOWNLOAD] = oldest->ft_->GetMaxSpeed(DDIR_DOWNLOAD);
