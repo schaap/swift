@@ -588,6 +588,12 @@ int SwarmManager::GetSwarmLocation( const std::vector<SwarmData*>& list, const S
         }
     }
     assert( low >= 0 && low <= list.size() );
+#if SWARMMANAGER_ASSERT_INVARIANTS
+    if( low == list.size() ) {
+        for( std::vector<SwarmData*>::iterator iter = list.begin(); iter != list.end(); iter++ )
+            assert( (*iter)->rootHash_ != rootHash );
+    }
+#endif
     return low;
 }
 
