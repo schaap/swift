@@ -103,6 +103,10 @@ namespace swift {
         int maxActiveSwarms_;
         int activeSwarmCount_;
         std::vector<SwarmData*> activeSwarms_;
+
+#if SWARMMANAGER_ASSERT_INVARIANTS
+        void invariant();
+#endif
     public:
         // Singleton
         static SwarmManager& GetManager();

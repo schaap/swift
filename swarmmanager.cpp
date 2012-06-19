@@ -1,5 +1,8 @@
 #include <string.h>
 #include <time.h>
+
+#define SWARMMANAGER_ASSERT_INVARIANTS 1
+
 #include "swift.h"
 
 #define SECONDS_UNTIL_INDEX_REUSE   120
@@ -539,4 +542,95 @@ SwarmManager::Iterator SwarmManager::end() {
     return SwarmManager::Iterator( swarmList_.size() );
 }
 
+#if SWARMMANAGER_ASSERT_INVARIANTS
+#include <assert.h>
+void SwarmManager::invariant() {
+    int i, j;
+    bool f;
+    int c1, c2, c3;
+    c1 = 0;
+    c3 = 0;
+    tint t;
+    for( i = 0; i < 64; i++ ) {
+        std::vector<SwarmData*> l = knownSwarms_[i];
+        for( std::vector<SwarmData*>::iterator iter = l.begin(); iter != l.end(); iter++ ) {
+            assert( (*iter) );
+            assert( (*iter)->RootHash() != Sha1Hash::ZERO );
+            assert( ((*iter)->RootHash().bits[0] & 63) == i );
+            f = false;
+            for( std::vector<SwarmData*>::iterator iter2 = swarmList_.begin(); iter2 != swarmList_.end(); iter2++ ) {
+                if( (*iter) == (*iter2) ) {
+                    f = true;
+                    break;
+                }
+            }
+            assert( f );
+            c1++;
+        }
+        for( j = 1; j < l.size(); j++ )
+            assert( memcmp( l[j-1]->RootHash().bits, l[j]->RootHash().bits, Sha1Hash::SIZE ) < 0 );
+        for( j = 0; j < l.size(); j++ )
+            assert( GetSwarmLocation( l, l[j]->RootHash() ) == j );
+    }
+    c2 = 0;
+    for( std::vector<SwarmData*>::iterator iter = swarmList_.begin(); iter != swarmList_.end(); iter++ ) {
+        if( !(*iter) ) {
+            c3++;
+            continue;
+        }
+        if( (*iter)->RootHash() != Sha1Hash::ZERO ) {
+            assert( GetSwarmData( (*iter)->RootHash() ) == (*iter) );
+            c2++;
+        }
+        assert( ((bool)(*iter)->ft_) ^ (!(*iter)->IsActive()) );
+    }
+    assert( !FindSwarm( -1 ) );
+    assert( !FindSwarm( Sha1Hash::ZERO ) );
+    for( i = 0; i < swarmList_.size(); i++ ) {
+        assert( (!swarmList_[i]) || (swarmList_[i]->Id() == i) );
+        if( swarmList_[i] ) {
+            assert( swarmList_[i] == FindSwarm( i ) );
+            assert( (swarmList_[i]->RootHash() == Sha1Hash::ZERO) || (swarmList_[i] == FindSwarm( swarmList_[i]->RootHash() ) ) );
+        }
+        else
+            assert( !FindSwarm( i ) );
+    }
+    assert( !FindSwarm( swarmList_.size() ) );
+    t = 0;
+    for( std::list<UnusedIndex>::iterator iter = unusedIndices_.begin(); iter != unusedIndices_.end(); iter++ ) {
+        assert( (*iter).index >= 0 );
+        assert( (*iter).index < swarmList_.size() );
+        assert( !swarmList_[(*iter).index] );
+        assert( (*iter).since > t );
+        t = (*iter).since;
+    }
+    assert( c1 == c2 );
+    assert( c3 == unusedIndices_.size() );
+    c1 = 0;
+    for( Iterator iter = begin(); iter != end(); iter++ ) {
+        assert( *iter );
+        assert( (*iter)->Id() >= 0 );
+        assert( (*iter)->Id() < swarmList_.size() );
+        assert( swarmList_[(*iter)->Id()] == (*iter) );
+        c1++;
+    }
+    assert( c1 == (swarmList_.size() - c3) );
+
+    c1 = 0;
+    for( std::vector<SwarmData*>::iterator iter = swarmList_.begin(); iter != swarmList_.end(); iter++ ) {
+        if( (*iter) && (*iter)->IsActive() )
+            c1++;
+    }
+    for( std::vector<SwarmData*>::iterator iter = activeSwarms_.begin(); iter != activeSwarms_.end(); iter++ ) {
+        assert( (*iter) );
+        assert( (*iter)->IsActive() );
+        assert( (*iter)->Id() >= 0 );
+        assert( (*iter)->Id() < swarmList_.size() );
+        assert( swarmList_[(*iter)->Id()] == (*iter) );
+    }
+    assert( c1 <= maxActiveSwarms_ || evtimer_pending( eventCheckToBeRemoved_, NULL ) );
+    assert( c1 == activeSwarmCount_ );
+    assert( activeSwarmCount_ == activeSwarms_.size() );
+}
+#endif
 }
