@@ -8,6 +8,13 @@
 #define SECONDS_UNTIL_INDEX_REUSE   120
 #define SECONDS_UNUSED_UNTIL_SWARM_MAY_BE_DEACTIVATED   30
 
+#if SWARMMANAGER_ASSERT_INVARIANTS
+#include <assert.h>
+#else
+#define assert()
+#define invariant()
+#endif
+
 namespace swift {
 
 // FIXME: Difference between seeds (complete) and downloads; allow setting minimum number of seeds?
@@ -67,6 +74,7 @@ FileTransfer* SwarmData::GetTransfer(bool touch) {
         if( !IsActive() )
             return NULL;
     }
+    assert( ft_ );
     return ft_;
 }
 
@@ -90,6 +98,7 @@ void SwarmData::SetMaxSpeed(data_direction_t ddir, double speed) {
     if( speed <= 0 )
         return;
     if( ft_ ) {
+        assert( !cached_ );
         // Arno, 2012-05-25: SetMaxSpeed resets the current speed history, so
         // be careful here.
         if( ft_->GetMaxSpeed( ddir ) != speed )
@@ -100,15 +109,19 @@ void SwarmData::SetMaxSpeed(data_direction_t ddir, double speed) {
 }
 
 void SwarmData::AddProgressCallback(ProgressCallback cb, uint8_t agg) {
-    if( ft_ )
+    if( ft_ ) {
+        assert( !cached_ );
         ft_->AddProgressCallback(cb, agg);
+    }
     else if( cached_ )
         cachedCallbacks_.push_back( std::pair<ProgressCallback, uint8_t>( cb, agg ) );
 }
 
 void SwarmData::RemoveProgressCallback(ProgressCallback cb) {
-    if( ft_ )
+    if( ft_ ) {
+        assert( !cached_ );
         ft_->RemoveProgressCallback(cb);
+    }
     else if( cached_ ) {
         for( std::list< std::pair<ProgressCallback, uint8_t> >::iterator iter = cachedCallbacks_.begin(); iter != cachedCallbacks_.end(); iter++ ) {
             if( (*iter).first == cb ) {
@@ -120,32 +133,42 @@ void SwarmData::RemoveProgressCallback(ProgressCallback cb) {
 }
 
 uint64_t SwarmData::Size() {
-    if( ft_ )
+    if( ft_ ) {
+        assert( !cached_ );
         return ft_->hashtree()->size();
+    }
     else if( cached_ )
         return cachedSize_;
     return 0;
 }
 
 bool SwarmData::IsComplete() {
-    if( ft_ )
+    if( ft_ ) {
+        assert( !cached_ );
         return ft_->hashtree()->is_complete();
-    else if( cached_ )
+    }
+    else if( cached_ ) {
+        assert( ( cachedSize_ == cachedComplete_ ) == cachedIsComplete_ );
         return cachedIsComplete_;
+    }
     return false;
 }
 
 uint64_t SwarmData::Complete() {
-    if( ft_ )
+    if( ft_ ) {
+        assert( !cached_ );
         return ft_->hashtree()->complete();
+    }
     else if( cached_ )
         return cachedComplete_;
     return 0;
 }
 
 std::string SwarmData::OSPathName() {
-    if( ft_ )
+    if( ft_ ) {
+        assert( !cached_ );
         return ft_->GetStorage()->GetOSPathName();
+    }
     else if( cached_ )
         return cachedOSPathName_;
     return std::string();
@@ -156,7 +179,9 @@ SwarmManager::SwarmManager() :
     swarmsToBeRemoved_(), eventCheckToBeRemoved_(NULL),
     maxActiveSwarms_( 256 ), activeSwarmCount_( 0 ), activeSwarms_()
 {
+    invariant();
     eventCheckToBeRemoved_ = evtimer_new( Channel::evbase, CheckSwarmsToBeRemovedCallback, this );
+    invariant();
 }
 
 SwarmManager::~SwarmManager() {
@@ -171,12 +196,22 @@ SwarmManager::~SwarmManager() {
 #define rootHashToList( rootHash ) (knownSwarms_[rootHash.bits[0]&63])
 
 SwarmData* SwarmManager::AddSwarm( const std::string filename, const Sha1Hash& hash, const Address& tracker, bool check_hashes, uint32_t chunk_size, bool zerostate ) {
+    invariant();
     SwarmData sd( filename, hash, tracker, check_hashes, chunk_size, zerostate );
+#if SWARMMANAGER_ASSERT_INVARIANTS
+    SwarmData* res = AddSwarm( sd );
+    assert( hash == Sha1Hash::ZERO || res == FindSwarm( hash ) );
+    assert( res == FindSwarm( res->Id() ) );
+    invariant();
+    return res;
+#else
     return AddSwarm( sd );
+#endif
 }
 
 // Can return NULL. Can also return a non-active swarm, even though it tries to activate by default.
 SwarmData* SwarmManager::AddSwarm( const SwarmData& swarm ) {
+    invariant();
     // FIXME: Handle a swarm that has no rootHash yet in a better way: queue it and build the rootHash in the background.
     SwarmData* newSwarm = new SwarmData( swarm );
     if( swarm.rootHash_ == Sha1Hash::ZERO ) {
@@ -191,6 +226,9 @@ SwarmData* SwarmManager::AddSwarm( const SwarmData& swarm ) {
     if( list[loc]->rootHash_ == newSwarm->rootHash_ ) {
         delete newSwarm;
         // Let's assume here that the rest of the data is, hence, also equal
+        assert( swarm.rootHash_ != Sha1Hash::ZERO );
+        assert( list[loc] == FindSwarm( swarm.rootHash_ ) );
+        invariant();
         return list[loc];
     }
     list.push_back( NULL );
@@ -210,15 +248,21 @@ SwarmData* SwarmManager::AddSwarm( const SwarmData& swarm ) {
         delete newSwarm->ft_;
         newSwarm->ft_ = NULL;
     }
+    assert( swarm.rootHash_ == Sha1Hash::ZERO || newSwarm == FindSwarm( swarm.rootHash_ ) );
+    assert( newSwarm == FindSwarm( newSwarm->Id() ) );
+    invariant();
     return newSwarm;
 }
 
 void SwarmManager::BuildSwarm( SwarmData* swarm ) {
+    assert( swarm );
+    invariant();
     swarm->ft_ = new FileTransfer( swarm->id_, swarm->filename_, swarm->rootHash_, swarm->checkHashes_, swarm->chunkSize_, swarm->zerostate_ );
     if( !swarm->ft_ )
         return;
     if( swarm->rootHash_ == Sha1Hash::ZERO )
         swarm->rootHash_ = swarm->ft_->root_hash();
+    assert( swarm->RootHash() != Sha1Hash::ZERO );
     if( swarm->cached_ ) {
         swarm->cached_ = false;
         swarm->SetMaxSpeed( DDIR_DOWNLOAD, swarm->cachedMaxSpeeds_[DDIR_DOWNLOAD] );
@@ -237,10 +281,13 @@ void SwarmManager::BuildSwarm( SwarmData* swarm ) {
         swarm->ft_->SetTracker( swarm->tracker_ );
         swarm->ft_->ConnectToTracker();
     }
+    invariant();
 }
 
 // Refuses to remove an active swarm, but flags it for future removal
 void SwarmManager::RemoveSwarm( const Sha1Hash& rootHash, bool removeState, bool removeContent ) {
+    invariant();
+    assert( rootHash != Sha1Hash::ZERO );
     std::vector<SwarmData*> list = rootHashToList(rootHash);
     int loc = GetSwarmLocation( list, rootHash );
     SwarmData* swarm = list[loc];
@@ -251,6 +298,7 @@ void SwarmManager::RemoveSwarm( const Sha1Hash& rootHash, bool removeState, bool
         swarmsToBeRemoved_.push_back(swarm->id_);
         if( !evtimer_pending( eventCheckToBeRemoved_, NULL ) )
             evtimer_add( eventCheckToBeRemoved_, tint2tv(5*TINT_SEC) );
+        invariant();
         return;
     }
     if( swarm->rootHash_ == rootHash ) {
@@ -263,6 +311,9 @@ void SwarmManager::RemoveSwarm( const Sha1Hash& rootHash, bool removeState, bool
     ui.since = usec_time();
     swarmList_[ui.index] = NULL;
     unusedIndices_.push_back(ui);
+    invariant();
+    assert( !FindSwarm( rootHash ) );
+    assert( !FindSwarm( swarm->Id() ) );
 
     //MULTIFILE
     // Arno, 2012-05-23: Copy all filename to be deleted to a set. This info is lost after
@@ -322,6 +373,8 @@ void SwarmManager::RemoveSwarm( const Sha1Hash& rootHash, bool removeState, bool
             print_error("Could not remove file");
         }
     }
+    
+    invariant();
 }
 
 void SwarmManager::CheckSwarmsToBeRemovedCallback(evutil_socket_t fd, short events, void* arg) {
@@ -329,6 +382,7 @@ void SwarmManager::CheckSwarmsToBeRemovedCallback(evutil_socket_t fd, short even
 }
 
 void SwarmManager::CheckSwarmsToBeRemoved() {
+    invariant();
     // Remove swarms that are scheduled to be removed
     tint old = usec_time() - SECONDS_UNUSED_UNTIL_SWARM_MAY_BE_DEACTIVATED;
     for( std::list<int>::iterator it = swarmsToBeRemoved_.begin(); it != swarmsToBeRemoved_.end(); ) {
@@ -357,36 +411,60 @@ void SwarmManager::CheckSwarmsToBeRemoved() {
 
     if( swarmsToBeRemoved_.size() > 0 || activeSwarmCount_ > maxActiveSwarms_ )
         evtimer_add( eventCheckToBeRemoved_, tint2tv(5*TINT_SEC) );
+    invariant();
 }
 
 SwarmData* SwarmManager::FindSwarm( int id ) {
-    if( id >= swarmList_.size() )
+    invariant();
+    if( id < 0 || id >= swarmList_.size() )
         return NULL;
+    assert( !swarmList_[id] || swarmList_[id]->Id() == id );
+    invariant();
     return swarmList_[id];
 }
 
 SwarmData* SwarmManager::FindSwarm( const Sha1Hash& rootHash ) {
+    invariant();
     SwarmData* swarm = GetSwarmData( rootHash );
-    if( swarm && swarm->rootHash_ == rootHash )
+    if( swarm && swarm->rootHash_ == rootHash ) {
+        assert( swarm->RootHash() == rootHash );
+        invariant();
         return swarm;
+    }
+    invariant();
     return NULL;
 }
 
 // Returns NULL if !containsSwarm( rootHash ) or too many swarms are already active
 SwarmData* SwarmManager::ActivateSwarm( const Sha1Hash& rootHash ) {
+    assert( rootHash != Sha1Hash::ZERO );
+    invariant();
     SwarmData* sd = GetSwarmData( rootHash );
     if( !sd || !(sd->rootHash_ == rootHash) || sd->toBeRemoved_ )
         return NULL;
+#if SWARMMANAGER_ASSERT_INVARIANTS
+    SwarmData* res = ActivateSwarm( sd );
+    assert( !res || res->IsActive() );
+    invariant();
+    return res;
+#else
     return ActivateSwarm( sd );
+#endif
 }
 
 SwarmData* SwarmManager::ActivateSwarm( SwarmData* sd ) {
+    assert( sd );
+    assert( FindSwarm( sd->Id() ) == sd );
+    invariant();
+
     if( sd->active_ )
         return sd;
 
     if( activeSwarmCount_ >= maxActiveSwarms_ ) {
-        if(! DeactivateSwarm() )
+        if(! DeactivateSwarm() ) {
+            invariant();
             return NULL;
+        }
     }
 
     activeSwarmCount_++;
@@ -396,6 +474,7 @@ SwarmData* SwarmManager::ActivateSwarm( SwarmData* sd ) {
 
         if( !sd->ft_ ) {
             activeSwarmCount_--;
+            invariant();
             return NULL;
         }
     }
@@ -404,10 +483,12 @@ SwarmData* SwarmManager::ActivateSwarm( SwarmData* sd ) {
     sd->latestUse_ = 0;
     activeSwarms_.push_back( sd );
     
+    invariant();
     return sd;
 }
 
 bool SwarmManager::DeactivateSwarm() {
+    invariant();
     tint old = usec_time() - SECONDS_UNUSED_UNTIL_SWARM_MAY_BE_DEACTIVATED;
     SwarmData* oldest = NULL;
     int oldestloc;
@@ -417,8 +498,10 @@ bool SwarmManager::DeactivateSwarm() {
             oldestloc = i;
         }
     }
-    if( !oldest )
+    if( !oldest ) {
+        invariant();
         return false;
+    }
 
     // Checkpoint before deactivating
     if( Checkpoint( oldest->id_ ) == -1 && !oldest->zerostate_ ) {
@@ -455,6 +538,7 @@ bool SwarmManager::DeactivateSwarm() {
         oldest->ft_ = NULL;
     }
 
+    invariant();
     return true;
 }
 
@@ -463,6 +547,7 @@ int SwarmManager::GetMaximumActiveSwarms() {
 }
 
 void SwarmManager::SetMaximumActiveSwarms( int newMaxSwarms ) {
+    invariant();
     if( newMaxSwarms <= 0 )
         return;
     while( newMaxSwarms < activeSwarmCount_ )
@@ -471,17 +556,23 @@ void SwarmManager::SetMaximumActiveSwarms( int newMaxSwarms ) {
     maxActiveSwarms_ = newMaxSwarms;
     if( maxActiveSwarms_ < activeSwarmCount_ && !evtimer_pending( eventCheckToBeRemoved_, NULL ) )
         evtimer_add( eventCheckToBeRemoved_, tint2tv(5*TINT_SEC) );
+    invariant();
 }
 
 SwarmData* SwarmManager::GetSwarmData( const Sha1Hash& rootHash ) {
+    invariant();
     std::vector<SwarmData*> list = rootHashToList(rootHash);
     int loc = GetSwarmLocation( list, rootHash );
-    if( loc >= list.size() )
+    if( loc >= list.size() ) {
+        invariant();
         return NULL;
+    }
+    invariant();
     return list[loc];
 }
 
 int SwarmManager::GetSwarmLocation( const std::vector<SwarmData*>& list, const Sha1Hash& rootHash ) {
+    invariant(); // Pure lookup, don't check invariant at the end
     int low = 0;
     int high = list.size() - 1;
     int mid, c, res;
@@ -495,9 +586,14 @@ int SwarmManager::GetSwarmLocation( const std::vector<SwarmData*>& list, const S
             low = mid + 1;
         else if( res > 0 )
             high = mid;
-        else
+        else {
+            invariant();
+            assert( mid >= 0 && mid < list.size() );
             return mid;
+        }
     }
+    invariant();
+    assert( low >= 0 && low <= list.size() );
     return low;
 }
 
@@ -543,7 +639,6 @@ SwarmManager::Iterator SwarmManager::end() {
 }
 
 #if SWARMMANAGER_ASSERT_INVARIANTS
-#include <assert.h>
 void SwarmManager::invariant() {
     int i, j;
     bool f;
