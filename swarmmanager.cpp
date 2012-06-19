@@ -414,24 +414,21 @@ void SwarmManager::CheckSwarmsToBeRemoved() {
     invariant();
 }
 
+// Called from invariant()
 SwarmData* SwarmManager::FindSwarm( int id ) {
-    invariant();
     if( id < 0 || id >= swarmList_.size() )
         return NULL;
     assert( !swarmList_[id] || swarmList_[id]->Id() == id );
-    invariant();
     return swarmList_[id];
 }
 
+// Called from invariant()
 SwarmData* SwarmManager::FindSwarm( const Sha1Hash& rootHash ) {
-    invariant();
     SwarmData* swarm = GetSwarmData( rootHash );
     if( swarm && swarm->rootHash_ == rootHash ) {
         assert( swarm->RootHash() == rootHash );
-        invariant();
         return swarm;
     }
-    invariant();
     return NULL;
 }
 
@@ -491,7 +488,7 @@ bool SwarmManager::DeactivateSwarm() {
     invariant();
     tint old = usec_time() - SECONDS_UNUSED_UNTIL_SWARM_MAY_BE_DEACTIVATED;
     SwarmData* oldest = NULL;
-    int oldestloc;
+    int oldestloc = 0;
     for( int i = 0; i < activeSwarms_.size(); i++ ) {
         if( activeSwarms_[i]->latestUse_ < old && ( !oldest || ( oldest->latestUse_ > activeSwarms_[i]->latestUse_ ) ) ) {
             oldest = activeSwarms_[i];
@@ -559,20 +556,17 @@ void SwarmManager::SetMaximumActiveSwarms( int newMaxSwarms ) {
     invariant();
 }
 
+// Called from invariant()
 SwarmData* SwarmManager::GetSwarmData( const Sha1Hash& rootHash ) {
-    invariant();
     std::vector<SwarmData*> list = rootHashToList(rootHash);
     int loc = GetSwarmLocation( list, rootHash );
-    if( loc >= list.size() ) {
-        invariant();
+    if( loc >= list.size() )
         return NULL;
-    }
-    invariant();
     return list[loc];
 }
 
+// Called from invariant()
 int SwarmManager::GetSwarmLocation( const std::vector<SwarmData*>& list, const Sha1Hash& rootHash ) {
-    invariant(); // Pure lookup, don't check invariant at the end
     int low = 0;
     int high = list.size() - 1;
     int mid, c, res;
@@ -592,7 +586,6 @@ int SwarmManager::GetSwarmLocation( const std::vector<SwarmData*>& list, const S
             return mid;
         }
     }
-    invariant();
     assert( low >= 0 && low <= list.size() );
     return low;
 }
