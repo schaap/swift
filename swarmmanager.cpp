@@ -1,7 +1,7 @@
 #include <string.h>
 #include <time.h>
 
-#define SWARMMANAGER_ASSERT_INVARIANTS 1
+#define SWARMMANAGER_ASSERT_INVARIANTS 0
 
 #include "swift.h"
 
@@ -16,6 +16,7 @@
 #define exit( x )
     //fprintf( stderr, "[%02d] Leaving " x "\n", levelcount-- );
 #else
+#undef assert
 #define assert( x )
 #define invariant()
 #define enter( x )
@@ -171,6 +172,25 @@ uint64_t SwarmData::Complete() {
     return 0;
 }
 
+uint64_t SwarmData::SeqComplete(int64_t offset) {
+    if( ft_ ) {
+        assert( !cached_ );
+        return ft_->hashtree()->seq_complete(offset);
+    }
+    else if( offset == 0 && cached_ )
+        return cachedComplete_;
+    else {
+        // Need to wake the process to answer this
+        SwarmData* swarm = SwarmManager::GetManager().ActivateSwarm( rootHash_ );
+        if( swarm ) {
+            assert( ft_ );
+            return ft_->hashtree()->seq_complete(offset);
+        }
+    }
+    return 0;
+}
+
+
 std::string SwarmData::OSPathName() {
     if( ft_ ) {
         assert( !cached_ );
@@ -184,7 +204,7 @@ std::string SwarmData::OSPathName() {
 SwarmManager::SwarmManager() :
     knownSwarms_( 64, std::vector<SwarmData*>() ), swarmList_(), unusedIndices_(),
     eventCheckToBeRemoved_(NULL),
-    maxActiveSwarms_( 8 ), activeSwarmCount_( 0 ), activeSwarms_()
+    maxActiveSwarms_( 256 ), activeSwarmCount_( 0 ), activeSwarms_()
 {
     enter( "cons" );
     // Do not call the invariant here, directly or indirectly: screws up event creation
@@ -304,7 +324,7 @@ void SwarmManager::BuildSwarm( SwarmData* swarm ) {
         swarm->ft_->SetTracker( swarm->tracker_ );
         swarm->ft_->ConnectToTracker();
     }
-    invariant();
+    // Swarm just became active (because ->ft_), but still needs to be made ->active_, so invariant does not hold
     exit( "buildswarm" );
 }
 
@@ -517,8 +537,6 @@ SwarmData* SwarmManager::ActivateSwarm( SwarmData* sd ) {
         }
     }
 
-    activeSwarmCount_++;
-
     if( !sd->ft_ || !sd->ft_->IsOperational() ) {
         if( sd->ft_ )
             delete sd->ft_;
@@ -527,12 +545,13 @@ SwarmData* SwarmManager::ActivateSwarm( SwarmData* sd ) {
         if( !sd->ft_ || !sd->ft_->IsOperational() ) {
             if( sd->ft_ )
                 delete sd->ft_;
-            activeSwarmCount_--;
             invariant();
             exit( "activateswarm( swarm ) (3)" );
             return NULL;
         }
     }
+
+    activeSwarmCount_++;
 
     sd->active_ = true;
     sd->latestUse_ = 0;
@@ -541,6 +560,70 @@ SwarmData* SwarmManager::ActivateSwarm( SwarmData* sd ) {
     invariant();
     exit( "activateswarm( swarm )" );
     return sd;
+}
+
+void SwarmManager::DeactivateSwarm( SwarmData* swarm, int activeLoc ) {
+    enter( "deactivateswarm(swarm,loc)" );
+    assert( swarm );
+    assert( activeSwarms_[activeLoc] == swarm );
+
+    // Checkpoint before deactivating
+    if( Checkpoint( swarm->Id() ) == -1 && !swarm->zerostate_ ) {
+        // Checkpoint failed and it's not due to not being needed in zerostate; better check the hashes next timey
+        swarm->checkHashes_ = true;
+    }
+
+    swarm->active_ = false;
+    activeSwarms_[activeLoc] = activeSwarms_[activeSwarms_.size()-1];
+    activeSwarms_.pop_back();
+    activeSwarmCount_--;
+    if( swarm->toBeRemoved_ )
+        RemoveSwarm( swarm->rootHash_, swarm->stateToBeRemoved_, swarm->contentToBeRemoved_ );
+
+    if( swarm->ft_ ) {
+        swarm->cachedMaxSpeeds_[DDIR_DOWNLOAD] = swarm->ft_->GetMaxSpeed(DDIR_DOWNLOAD);
+        swarm->cachedMaxSpeeds_[DDIR_UPLOAD] = swarm->ft_->GetMaxSpeed(DDIR_UPLOAD);
+        swarm->cachedStorageReady_ = swarm->ft_->GetStorage()->IsReady();
+        if( swarm->cachedStorageReady_ ) {
+            storage_files_t sfs = swarm->ft_->GetStorage()->GetStorageFiles();
+            for( storage_files_t::iterator iter = sfs.begin(); iter != sfs.end(); iter++)
+                swarm->cachedStorageFilenames_.push_back( ((StorageFile*)*iter)->GetOSPathName() ); 
+        }
+        swarm->cachedSize_ = swarm->Size();
+        swarm->cachedIsComplete_ = swarm->IsComplete();
+        swarm->cachedComplete_ = swarm->Complete();
+        swarm->cachedSeqComplete_ = swarm->SeqComplete();
+        swarm->cachedOSPathName_ = swarm->OSPathName();
+        for( std::list< std::pair<ProgressCallback, uint8_t> >::iterator iter = swarm->ft_->callbacks_.begin(); iter != swarm->ft_->callbacks_.end(); iter++ )
+            swarm->cachedCallbacks_.push_back( std::pair<ProgressCallback, uint8_t>( (*iter).first, (*iter).second ) );
+        swarm->cached_ = true;
+        delete swarm->ft_;
+        swarm->ft_ = NULL;
+    }
+
+    exit( "deactivateswarm(swarm,loc)" );
+}
+
+void SwarmManager::DeactivateSwarm( const Sha1Hash& rootHash ) {
+    enter( "deactivateswarm(hash)" );
+    invariant();
+    SwarmData* swarm = FindSwarm( rootHash );
+    if( !swarm ) {
+        exit( "deactivateswarm(hash) (1)" );
+        return;
+    }
+
+    for( int i = 0; i < activeSwarms_.size(); i++ ) {
+        if( activeSwarms_[i] == swarm ) {
+            DeactivateSwarm( swarm, i );
+            invariant();
+            exit( "deactivateswarm(hash) (2)" );
+            return;
+        }
+    }
+
+    invariant();
+    exit( "deactivateswarm(hash)" );
 }
 
 bool SwarmManager::DeactivateSwarm() {
@@ -560,38 +643,7 @@ bool SwarmManager::DeactivateSwarm() {
         return false;
     }
 
-    // Checkpoint before deactivating
-    if( Checkpoint( oldest->id_ ) == -1 && !oldest->zerostate_ ) {
-        // Checkpoint failed and it's not due to not being needed in zerostate; better check the hashes next time
-        oldest->checkHashes_ = true;
-    }
-
-    oldest->active_ = false;
-    activeSwarms_[oldestloc] = activeSwarms_[activeSwarms_.size()-1];
-    activeSwarms_.pop_back();
-    activeSwarmCount_--;
-    if( oldest->toBeRemoved_ )
-        RemoveSwarm( oldest->rootHash_, oldest->stateToBeRemoved_, oldest->contentToBeRemoved_ );
-
-    if( oldest->ft_ ) {
-        oldest->cachedMaxSpeeds_[DDIR_DOWNLOAD] = oldest->ft_->GetMaxSpeed(DDIR_DOWNLOAD);
-        oldest->cachedMaxSpeeds_[DDIR_UPLOAD] = oldest->ft_->GetMaxSpeed(DDIR_UPLOAD);
-        oldest->cachedStorageReady_ = oldest->ft_->GetStorage()->IsReady();
-        if( oldest->cachedStorageReady_ ) {
-            storage_files_t sfs = oldest->ft_->GetStorage()->GetStorageFiles();
-            for( storage_files_t::iterator iter = sfs.begin(); iter != sfs.end(); iter++)
-                oldest->cachedStorageFilenames_.push_back( ((StorageFile*)*iter)->GetOSPathName() ); 
-        }
-        oldest->cachedSize_ = oldest->Size();
-        oldest->cachedIsComplete_ = oldest->IsComplete();
-        oldest->cachedComplete_ = oldest->Complete();
-        oldest->cachedOSPathName_ = oldest->OSPathName();
-        for( std::list< std::pair<ProgressCallback, uint8_t> >::iterator iter = oldest->ft_->callbacks_.begin(); iter != oldest->ft_->callbacks_.end(); iter++ )
-            oldest->cachedCallbacks_.push_back( std::pair<ProgressCallback, uint8_t>( (*iter).first, (*iter).second ) );
-        oldest->cached_ = true;
-        delete oldest->ft_;
-        oldest->ft_ = NULL;
-    }
+    DeactivateSwarm( oldest, oldestloc );
 
     exit( "deactivateswarm" );
     return true;

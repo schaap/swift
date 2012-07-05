@@ -42,22 +42,26 @@ void ZeroState::LibeventCleanCallback(int fd, short event, void *arg)
 		return;
 
 	// See which zero state FileTransfers have no clients
-	std::set<int> delset;
+	std::list<Sha1Hash> delset;
     for( SwarmManager::Iterator iter = SwarmManager::GetManager().begin(); iter != SwarmManager::GetManager().end(); iter++ ) {
-        FileTransfer* ft = (*iter)->GetTransfer(false);
-        if( !ft || ((*iter)->IsZeroState() && ft->GetChannels().size() == 0) )
-            delset.insert( (*iter)->Id() );
-        else
-            dprintf("%s zero clean %s has %d peers\n",tintstr(),ft->root_hash().hex().c_str(), (int)ft->GetChannels().size() );
+        if( (*iter)->IsZeroState() ) { 
+            FileTransfer* ft = (*iter)->GetTransfer(false);
+            if( ft ) {
+                if( ft->GetChannels().size() == 0 )
+                    delset.push_back( (*iter)->RootHash() );
+                else
+                    dprintf("%s zero clean %s has %d peers\n",tintstr(),ft->root_hash().hex().c_str(), (int)ft->GetChannels().size() );
+            }
+        }
     }
 
     // Delete 0-state FileTransfers sans peers
-	std::set<int>::iterator deliter;
+	std::list<Sha1Hash>::iterator deliter;
 	for (deliter=delset.begin(); deliter!=delset.end(); deliter++)
 	{
-		dprintf("%s hash %u zero clean close\n",tintstr(),*deliter );
+		dprintf("%s hash %s zero clean close\n",tintstr(),(*deliter).hex().c_str() );
 		//fprintf(stderr,"%s F%u zero clean close\n",tintstr(),ft->transfer_id() );
-		swift::Close(*deliter);
+        SwarmManager::GetManager().DeactivateSwarm( *deliter );
 	}
 
 	// Reschedule cleanup

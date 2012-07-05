@@ -29,6 +29,7 @@ namespace swift {
         uint64_t cachedComplete_;
         std::string cachedOSPathName_;
         std::list< std::pair<ProgressCallback, uint8_t> > cachedCallbacks_;
+        uint64_t cachedSeqComplete_; // Only for offset = 0
         bool cached_;
     public:
         SwarmData( const std::string filename, const Sha1Hash& rootHash, const Address& tracker, bool check_hashes, uint32_t chunk_size, bool zerostate );
@@ -51,6 +52,7 @@ namespace swift {
         uint64_t Size();
         bool IsComplete();
         uint64_t Complete();
+        uint64_t SeqComplete(int64_t offset = 0);
         std::string OSPathName();
 
         void SetMaxSpeed(data_direction_t ddir, double speed);
@@ -94,9 +96,11 @@ namespace swift {
 
         // Internal activation method
         SwarmData* ActivateSwarm( SwarmData* swarm );
+        void BuildSwarm( SwarmData* swarm );
 
         // Internal method to find the oldest swarm and deactivate it
         bool DeactivateSwarm();
+        void DeactivateSwarm( SwarmData* swarm, int activeLoc );
 
         // Structures to keep track of active swarms
         int maxActiveSwarms_;
@@ -121,7 +125,7 @@ namespace swift {
 
         // Activate a swarm, so it can be used (not active swarms can't be read from/written to)
         SwarmData* ActivateSwarm( const Sha1Hash& rootHash );
-        void BuildSwarm( SwarmData* swarm );
+        void DeactivateSwarm( const Sha1Hash& rootHash );
 
         // Manage maximum of active swarms
         int GetMaximumActiveSwarms();
