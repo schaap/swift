@@ -27,6 +27,7 @@ using namespace swift;
 // FIXME: separate Bootstrap() and Download(), then Size(), Progress(), SeqProgress()
 
 FileTransfer::FileTransfer(int transfer_id, std::string filename, const Sha1Hash& root_hash, bool check_hashes, uint32_t chunk_size, bool zerostate) :
+    Operational(),
     transfer_id_(transfer_id), picker_(NULL), availability_(NULL),
     mychannels_(), speedzerocount_(0),
     tracker_(), tracker_retry_interval_(TRACKER_RETRY_INTERVAL_START), tracker_retry_time_(NOW),
@@ -85,6 +86,8 @@ FileTransfer::FileTransfer(int transfer_id, std::string filename, const Sha1Hash
     evtimer_assign(&evclean_,Channel::evbase,&FileTransfer::LibeventCleanCallback,this);
     evtimer_add(&evclean_,tint2tv(5*TINT_SEC));
 
+    if ((hashtree_ != NULL && !hashtree_->IsOperational()) || !storage_->IsOperational())
+        SetBroken();
 }
 
 
@@ -384,8 +387,10 @@ uint32_t	FileTransfer::GetNumSeeders()
 void FileTransfer::AddPeer(Address &peer)
 {
 	Channel *c = new Channel(this,INVALID_SOCKET,peer);
+#if OPTION_INCLUDE_PEER_TRACKING
     Channel::PeerReference* ref = Channel::AddKnownPeer(peer);
     delete ref; // TODO
+#endif
 }
 
 void FileTransfer::AddProgressCallback(ProgressCallback cb, uint8_t agg) {

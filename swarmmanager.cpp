@@ -519,10 +519,14 @@ SwarmData* SwarmManager::ActivateSwarm( SwarmData* sd ) {
 
     activeSwarmCount_++;
 
-    if( !sd->ft_ ) {
+    if( !sd->ft_ || !sd->ft_->IsOperational() ) {
+        if( sd->ft_ )
+            delete sd->ft_;
         BuildSwarm( sd );
 
-        if( !sd->ft_ ) {
+        if( !sd->ft_ || !sd->ft_->IsOperational() ) {
+            if( sd->ft_ )
+                delete sd->ft_;
             activeSwarmCount_--;
             invariant();
             exit( "activateswarm( swarm ) (3)" );

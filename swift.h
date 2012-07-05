@@ -70,6 +70,9 @@
 #include "avail.h"
 
 // SCHAAP: swarmmanager.h is included at the end, since it depends on a alot and nothing depends on it
+#ifndef OPTION_INCLUDE_PEER_TRACKING
+#define OPTION_INCLUDE_PEER_TRACKING 0
+#endif
 
 namespace swift {
 
@@ -263,7 +266,7 @@ namespace swift {
     class Storage;
 
     /** A class representing single file transfer. */
-    class    FileTransfer {
+    class    FileTransfer : public Operational {
 
     public:
 
@@ -503,6 +506,7 @@ namespace swift {
 	    /** the current time */
 	    static tint Time();
 
+#if OPTION_INCLUDE_PEER_TRACKING
         /** Management methods for the global peer list. **/
         // The address of the peer and the timestamp it was added to the list of all peers.
         class PeerListItem {
@@ -531,7 +535,7 @@ namespace swift {
         static const Address* LookupKnownPeer( const PeerReference& ref );
         // May return NULL, check that; returned PeerReference is to be deleted by caller
         static PeerReference* LookupKnownPeer( const Address& adr );
-
+#endif // OPTION_INCLUDE_PEER_TRACKING
 
         // Arno: Per instance methods
         void        Recv (struct evbuffer *evb);
@@ -629,9 +633,11 @@ namespace swift {
    	    static int sock_count;
 	    static sckrwecb_t sock_open[DGRAM_MAX_SOCK_OPEN];
 
+#if OPTION_INCLUDE_PEER_TRACKING
 #define MAX_SIZE_PEER_LIST 16384
         /** The list of all known peers. **/
         static std::vector<PeerListItem> knownPeers_;
+#endif // OPTION_INCLUDE_PEER_TRACKING
 
         /** Channel id: index in the channel array. */
         uint32_t    id_;
@@ -754,7 +760,7 @@ namespace swift {
     /*
      * Class representing a single file in a multi-file swarm.
      */
-    class StorageFile
+    class StorageFile : public Operational
     {
        public:
     	 StorageFile(std::string specpath, int64_t start, int64_t size, std::string ospath);
@@ -796,7 +802,7 @@ namespace swift {
 	 * pseudo filename META-INF-multifile-spec.txt) are the contents of the
 	 * swarm.
      */
-	class Storage {
+	class Storage : public Operational {
 
 	  public:
 

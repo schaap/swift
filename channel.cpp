@@ -41,7 +41,9 @@ FILE* Channel::debug_file = NULL;
 // SCHAAP: 2012-06-15 - Removed unused peer_selector to prevent confusion
 // PeerSelector* Channel::peer_selector = new SimpleSelector();
 tint Channel::MIN_PEX_REQUEST_INTERVAL = TINT_SEC;
+#if OPTION_INCLUDE_PEER_TRACKING
 std::vector<Channel::PeerListItem> Channel::knownPeers_(32);
+#endif
 
 
 /*
@@ -380,7 +382,7 @@ uint32_t Address::LOCALHOST = INADDR_LOOPBACK;
 /*
  * Peer list management
  */
-
+#if OPTION_INCLUDE_PEER_TRACKING
 Channel::PeerReference* Channel::AddKnownPeer( const Address& adr ) {
     int loc;
     int oldloc = -1;
@@ -429,12 +431,11 @@ Channel::PeerReference* Channel::LookupKnownPeer( const Address& adr ) {
     }
     return NULL;
 }
-
+#endif // OPTION_INCLUDE_PEER_TRACKING
 
 
 
 /*
-
  * Utility methods 1
  */
 

@@ -210,7 +210,7 @@ void    Channel::Send () {
             peer_channel_id_);
     int r = SendTo(socket_,peer(),evb);
     if (r==-1)
-        print_error("can't send datagram");
+        print_error("swift can't send datagram");
     else
     	raw_bytes_up_ += r;
     last_send_time_ = NOW;
@@ -1077,7 +1077,6 @@ void    Channel::RecvDatagram (evutil_socket_t socket) {
  * Channel instance methods
  */
 
-// SCHAAP: Shouldn't this method close *all* channels of that address? Unreachable is unreachable, right...
 void Channel::CloseChannelByAddress(const Address &addr)
 {
 	// fprintf(stderr,"CloseChannelByAddress: address is %s\n", addr.str() );
@@ -1091,9 +1090,11 @@ void Channel::CloseChannelByAddress(const Address &addr)
 			// Rescheduled.
 			c->peer_channel_id_ = 0; // established->false, do no more sending
 			c->Schedule4Close();
-			break;
 		}
     }
+#if OPTION_INCLUDE_PEER_TRACKING
+    Channel::RemoveKnownPeer(addr);
+#endif
 }
 
 

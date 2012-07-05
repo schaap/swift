@@ -93,15 +93,15 @@ int ZeroState::Find(Sha1Hash &root_hash)
 
 	std::string reqfilename = file_name;
     int ret = file_exists_utf8(reqfilename);
-	if (ret == 0 || ret == 2)
+	if (ret <= 0 || ret == 2)
 		return -1;
 	reqfilename = file_name+".mbinmap";
     ret = file_exists_utf8(reqfilename);
-	if (ret == 0 || ret == 2)
+	if (ret <= 0 || ret == 2)
 		return -1;
 	reqfilename = file_name+".mhash";
     ret = file_exists_utf8(reqfilename);
-	if (ret == 0 || ret == 2)
+	if (ret <= 0 || ret == 2)
 		return -1;
 
     SwarmData* swarm = SwarmManager::GetManager().AddSwarm(file_name, root_hash, Address(), false, chunk_size, true);

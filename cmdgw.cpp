@@ -37,6 +37,7 @@ using namespace swift;
 #define ERROR_UNKNOWN_CMD	-1
 #define ERROR_MISS_ARG		-2
 #define ERROR_BAD_ARG		-3
+#define ERROR_BAD_SWARM     -4
 
 #define CMDGW_MAX_CLIENT 1024   // Arno: == maximum number of swarms per proc
 
@@ -351,22 +352,16 @@ void CmdGwSendPLAY(cmd_gw_t *req)
 }
 
 
-void CmdGwSendERRORBySocket(evutil_socket_t cmdsock, std::string msg)
+void CmdGwSendERRORBySocket(evutil_socket_t cmdsock, std::string msg, const Sha1Hash& roothash=Sha1Hash::ZERO)
 {
-	std::string cmd = "ERROR 0000000000000000000000000000000000000000 ";
+	std::string cmd = "ERROR ";
+    cmd += roothash.hex();
+    cmd += " ";
 	cmd += msg;
 	cmd += "\r\n";
 	char *wire = strdup(cmd.c_str());
 	send(cmdsock,wire,strlen(wire),0);
 	free(wire);
-}
-
-void CmdGwSendERRORByTransfer(int transfer, std::string msg)
-{
-	cmd_gw_t* req = CmdGwFindRequestByTransfer(transfer);
-	if (req == NULL)
-		return;
-	CmdGwSendERRORBySocket(req->cmdsock,msg);
 }
 
 
@@ -478,7 +473,7 @@ void CmdGwSwiftFirstProgressCallback (int transfer, bin_t bin)
 				int ret = swift::Seek(req->transfer,sf->GetStart(),SEEK_SET);
 				if (ret < 0)
 				{
-					CmdGwSendERRORBySocket(req->cmdsock,"Error seeking to file in multi-file content.");
+					CmdGwSendERRORBySocket(req->cmdsock,"Error seeking to file in multi-file content.",swarm->RootHash());
 					return;
 				}
 				found = true;
@@ -494,7 +489,7 @@ void CmdGwSwiftFirstProgressCallback (int transfer, bin_t bin)
 			if (cmd_gw_debug)
 				fprintf(stderr,"cmd: SwiftFirstProgress: Error file not found %d\n", transfer );
 
-			CmdGwSendERRORBySocket(req->cmdsock,"Individual file not found in multi-file content.");
+			CmdGwSendERRORBySocket(req->cmdsock,"Individual file not found in multi-file content.",swarm->RootHash());
 			return;
 		}
 	}
@@ -685,9 +680,12 @@ void CmdGwNewRequestCallback(evutil_socket_t cmdsock, char *line)
 			msg = "unknown command";
 		else if (ret == ERROR_MISS_ARG)
 			msg = "missing parameter";
-		else
+        else if (ret == ERROR_BAD_ARG)
 			msg = "bad parameter";
-		CmdGwSendERRORBySocket(cmdsock,msg);
+        // BAD_SWARM already sent
+
+        if (msg != "")
+		    CmdGwSendERRORBySocket(cmdsock,msg);
         CmdGwCloseConnection(cmdsock);
 	}
 
@@ -798,6 +796,11 @@ int CmdGwHandleCommand(evutil_socket_t cmdsock, char *copyline)
         	else
         		filename = hashstr;
             transfer = swift::Open(filename,root_hash,trackaddr,false,chunksize);
+            if (transfer == -1)
+            {
+                CmdGwSendERRORBySocket(cmdsock,"bad swarm",root_hash);
+                return ERROR_BAD_SWARM;
+            }
         }
 
         // RATELIMIT
