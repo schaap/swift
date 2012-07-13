@@ -579,8 +579,8 @@ void ReportCallback(int fd, short event, void *arg) {
             size += swarm->Size();
         }
         fprintf(stderr,
-            "%s %llu of %llu (seq (%llu) %lli dgram %lli bytes up, " \
-            "%lli dram %lli bytes down\n",
+            "%s %llu of %llu (seq %llu) %lli dgram %lli bytes up, " \
+            "%lli dgram %lli bytes down\n",
             allComplete ? "DONE" : "done",
             complete, size, seqcomplete,
             (long long int)Channel::global_dgrams_up, (long long int)Channel::global_raw_bytes_up,
