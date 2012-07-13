@@ -565,6 +565,27 @@ void ReportCallback(int fd, short event, void *arg) {
     	    event_base_loopexit(Channel::evbase, NULL);
 
 	}
+    else if(report_progress) {
+        bool allComplete = true;
+        unsigned long long int complete = 0;
+        unsigned long long int size = 0;
+        unsigned long long int seqcomplete = 0;
+        for( SwarmManager::Iterator it = SwarmManager::GetManager().begin(); it != SwarmManager::GetManager().end(); it++ ) {
+            SwarmData* swarm = *it;
+            if( !swarm->IsComplete() )
+                allComplete = false;
+            complete += swarm->Complete();
+            seqcomplete += swarm->SeqComplete();
+            size += swarm->Size();
+        }
+        fprintf(stderr,
+            "%s %llu of %llu (seq (%llu) %lli dgram %lli bytes up, " \
+            "%lli dram %lli bytes down\n",
+            allComplete ? "DONE" : "done",
+            complete, size, seqcomplete,
+            (long long int)Channel::global_dgrams_up, (long long int)Channel::global_raw_bytes_up,
+            (long long int)Channel::global_dgrams_down, (long long int)Channel::global_raw_bytes_down );
+    }
     if (httpgw_enabled)
     {
         //fprintf(stderr,".");
